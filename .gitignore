@@ -1,0 +1,21 @@
+# CMake build
+build/
+compile_commands.json
+
+old/
+
+# Production output and logs
+out
+test_out/
+*.root
+*.log
+
+# Editor / local history
+.lh/
+.vscode/
+.cache/
+*~
+*.swp
+.DS_Store
+env.sh
+

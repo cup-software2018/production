@@ -1,0 +1,42 @@
+# Settings for produce_iadc.C.  Anything left out keeps the compiled-in default, and
+# the values that were actually used are copied into every output file as
+# TNamed objects.  Positions are in samples of 16 ns; a record is 62 samples.
+# Layout follows the WCMD production's prod.yaml.
+
+baseline:
+  # Normal triggers: `base`, `rms` and `qpre` come from here, in front of every
+  # pulse (the mean pulse is at 0.3% of its peak at sample 16).  Diagnostic
+  # only: the charge is taken against the header pedestal, which gives 448
+  # against 781 for this region on pedestal triggers.
+  window_normal: [0, 14]
+
+  # Pedestal triggers: the whole record has no pulse, so `base` and `rms` come
+  # from all of it.  [0, 0] means the whole record.
+  window_pedestal: [0, 0]      # [0, 0] = the whole record, whatever its length
+
+normal:
+  # Holds 99.8% of the mean pulse; pedestal rms 388 against 451 for [14, 56).
+  integration: [16, 48]
+
+  # Constant fraction of hmax for the leading-edge time `tlead`.
+  cf: 0.5
+
+  # The level under the charge.  fit: a flat level plus the dark pulses in
+  # window_normal (the same Moyal fit as below), so pulses in front of the
+  # signal do not lift it; stored as qbase.  header: the ADC header pedestal.
+  # On run 263 window_normal is only 14 samples; later runs have longer records.
+  baseline: fit
+
+pedestal:
+  # Dark-pulse fit on the pedestal triggers: a flat level plus n Moyal pulses of
+  # a common width, for the gain from single dark pulses (see produce.C).
+  fit:
+    enabled: true
+    sigma_e: 2.0          # ADC, noise per sample on pulse-free stretches
+    seed_height: 12.0     # ADC, smallest peak taken as a seed (~0.3 p.e.)
+    add_residual: 8.0     # ADC, residual that makes the fit try one more pulse
+    add_dchi2: 25.0       # chi2 a new pulse must buy to be kept
+    max_pulses: 12
+    sigma_range: [1.4, 2.4]   # samples; clean fits give 1.7-1.9
+    mu_min: -8.0          # earliest peak position allowed (before the record)
+    keep_height: 5.7      # ADC (0.15 p.e.); smaller pulses are not written

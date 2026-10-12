@@ -1,0 +1,140 @@
+# Settings for produce_fadc.C.  Anything left out keeps the compiled-in default, so
+# a file may carry only what it means to change, and the values that were
+# actually used are copied into every output file as TNamed objects.
+#
+# All positions and lengths are in samples: the NKFADC500 runs at 2 ns per
+# sample and a record is 1008 samples, so 1008 samples = 2.016 us.  Charges are
+# in ADC x samples.
+#
+# Two things share this file because they share the pass over the raw data.
+# The normal triggers go to the `normal` tree, where the light arrives in a
+# known window and the charge is the sum of the pulses found inside it.  The
+# 0.1 Hz pedestal triggers go to the `pedestal` tree, where there is no signal
+# region at all, and what is measured instead is the largest excursion anywhere
+# in the record and the charge around it.
+
+baseline:
+  # Samples more than this many rms above the level are dropped and the level
+  # is measured again, so a dark pulse sitting inside the baseline region
+  # cannot pull it up.  The rejection is one-sided because a pulse only ever
+  # pushes samples up, and it is applied to the parity-subtracted deviation,
+  # not to the raw sample: the two parities of a channel sit as much as 3 ADC
+  # apart, so a cut on the raw value would bite far harder into one of them.
+  clip_sigma: 4.0
+
+  # Repeats of that rejection.  It stops early once the surviving sample count
+  # stops changing, which on this data is after two or three passes.
+  iters: 4
+
+  # Normal triggers: the level is taken from this region of the record, which
+  # has to be in front of the signal.  The coincidence window opens at sample
+  # 232 and the trigger always lands on 296, so nothing before 232 can hold
+  # triggered light; 200 leaves margin for the channels whose cable delay puts
+  # them early.  Taking the level from only the front costs resolution -- the
+  # pedestal width of a 13-sample window is 4.13 against 3.77 when the whole
+  # record is available, 9.5% worse -- because the level wanders across the
+  # record faster than its 1.03 ADC of white noise would suggest.  There is no
+  # way around it here: past the signal the AC-coupling undershoot sits below
+  # the true level and would drag the estimate down.
+  window_normal: [0, 200]
+
+  # Pedestal triggers: the level is taken from this region, and here the whole
+  # record qualifies -- there is no signal window to stay out of, and the extra
+  # samples are what buy the 9.5% above.  A shorter region is a valid thing to
+  # study, which is why this is a parameter and not the record length.
+  window_pedestal: [0, 1008]
+
+  # ... except for this window around the peak that was just found, so the
+  # pulse cannot pull up the level that is about to be subtracted from it.  The
+  # positions are relative to the peak, not absolute.  The mean single
+  # photoelectron has nothing in front of it beyond -3 samples and has fallen
+  # to ~0.1 ADC by +45, so [-15, +50) removes the pulse and little else.
+  exclude_pedestal: [-15, 50]
+
+normal:
+  # Where the triggered light is.  232 is not a feature of the light: it is
+  # where the 128 ns coincidence window opens, 64 samples before the fixed
+  # trigger sample 296, which never moves.
+  # The upper end matters more.  Charge collected out to 384 and out to 416
+  # agrees to within 1.2% across the whole dynamic range, while stopping at 352
+  # costs 3% on small pulses but 14% on the largest -- a real non-linearity,
+  # not a scale factor.  Past ~416 the AC-coupling undershoot starts eating the
+  # integral back (a pulse above 400 has lost 14% by sample 672), so a longer
+  # window both adds noise and removes signal.
+  integration: [232, 416]
+
+  pulse:
+    # A pulse is an excursion above nsigma x the baseline rms inside the
+    # integration window.  Each is widened by `pre` in front and `post` behind
+    # to catch the rise and the tail, overlapping ones are merged, and the
+    # charge is the sum over what they cover.  Summing only the pulses rather
+    # than the whole window is what keeps the empty samples from adding noise:
+    # on pedestal triggers, where the answer should be zero, the per-channel rms
+    # is 3.66 this way against 31.73 for a plain window integral.
+    #
+    # A minimum width was measured and rejected: it removes 97% of the noise
+    # excursions but costs 8% of non-linearity, because the single-sample
+    # excursions in a real event are mostly late photoelectrons, not noise.
+    nsigma: 4.0
+    pre: 3
+    post: 21
+
+pedestal:
+  # (head, tail) in samples either side of the peak, the peak included, so
+  # [2, 6] covers 9 samples.  Five of them are kept because which one is best
+  # is a real question and the answer is cheap to carry: each costs 8 bytes a
+  # channel.  What they hold of the pulse, and the width of their own pedestal,
+  # measured on run 263:
+  #
+  #     window    samples   charge held   pedestal width
+  #     q_2_6         9         84.4%          3.05
+  #     q_4_8        13         88.2%          3.76
+  #     q_6_16       23         93.3%          5.32
+  #     q_8_24       33         96.2%          6.72
+  #     q_10_45      56         99.9%          9.59
+  #
+  # The noise grows faster than sqrt(N) -- the wide window collects 1.5x the
+  # variance white noise would give -- because of the same low-frequency wander
+  # that limits the baseline, and it is symmetric, so it is drift and not
+  # missed pulses.  Measured on the same pulses selected by height, which no
+  # window can influence, the narrow ones win: the charge resolution is 0.187,
+  # 0.201, 0.215, 0.229, 0.264 in the order above.  The two-Gaussian fit agrees
+  # -- it returns the same dark rate within 0.8% for the first four and breaks
+  # only on q_10_45, whose pedestal is wide enough to swallow the photoelectron
+  # peak.
+  windows: [[2, 6], [4, 8], [6, 16], [8, 24], [10, 45]]
+
+  # Where the largest excursion is allowed to sit.  The bounds only have to
+  # leave room: 15 covers the widest head and the baseline exclusion, and 957
+  # is 1008 minus the widest tail and that same exclusion.  Dark pulses are
+  # uniform in time, so nothing physical is lost at the edges -- but the live
+  # time behind a rate measured from this tree is the width of this range, not
+  # the whole record.
+  hmax_range: [15, 957]
+
+  # `qp_*` is the same integrator run at a random position with no pulse in it,
+  # which is what turns the noise of the charge estimator into something
+  # measured instead of assumed.  The gate keeps at least this far from the
+  # peak, comfortably clear of the widest window's 56 samples and of the
+  # ~100 ns within which a companion pulse tends to follow.
+  ped_away: 80
+
+  # `hmax2` is the largest thing left once the peak and this much either side
+  # of it are taken out.  It is the noise reference for `hmax`, and the handle
+  # on whether a record held more than one pulse.  Note that this blinds the
+  # first 40 ns after the peak, which is where type-1 afterpulses concentrate.
+  second_away: 20
+
+  # Seed for those gate positions.  The generator is started from
+  # seed + 1000*run + first subrun, so parallel chunks of one run do not repeat
+  # each other's positions and a rerun reproduces them exactly.
+  seed: 0
+
+channels:
+  # PIDs to keep, per board.  FADC1 sends 48 channels but only 1..47 carry a
+  # PMT -- PID 48 is an empty channel and is dropped here rather than being
+  # written out and filtered later.  The 48th PMT is at the door, reads out on
+  # FADC2 as PID 49, and runs on its own trigger path, so that board is
+  # produced separately and its numbers are not mixed with the tank's.
+  1: [1, 47]
+  2: [49, 49]

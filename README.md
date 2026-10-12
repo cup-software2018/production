@@ -383,12 +383,11 @@ Per channel:
 
 1. **Header pedestal.**  Take the pedestal the ADC writes in the channel
    header → `ped`, and subtract it from every sample.
-2. **Level under the charge** (`normal.baseline: fit`, the default).  Fit the
-   samples of `window_normal` with the dark-pulse fit below; its flat level is
+2. **Level under the charge** (`normal.baseline: fit`, the default).  Fit
+   with the dark-pulse fit below — `window_normal` on normal triggers, the
+   whole record on pedestal triggers, which have no light; its flat level is
    the true baseline, which the dark pulses had lifted the header pedestal
    above → `qbase` (0 if the fit fails, or with `normal.baseline: header`).
-   This is done on both trees, so the pedestal tree stays the noise reference
-   of the normal one.
 3. **Baseline region.**  Mean and rms of the raw samples over `window_normal`
    on normal triggers, over `window_pedestal` (the whole record by default) on
    pedestal triggers → `base`, `rms`.  From here on every sample is taken
@@ -401,9 +400,8 @@ Per channel:
      `hmax`, interpolated between samples → `tlead` (−1 if none).
 4. Copy the DAQ trigger bit → `tbit`; count the channels with it set → `nhit`,
    and the modules they belong to → `nmod`.
-5. **Dark pulses** → `fit_*`, `npul`, `pul_*`.  On pedestal triggers fit the
-   whole record (if `pedestal.fit.enabled`); on normal triggers keep the
-   `window_normal` fit of step 2.
+5. **Dark pulses** → `fit_*`, `npul`, `pul_*`, from the same fit as step 2
+   (on pedestal triggers only if `pedestal.fit.enabled`).
 
 **The dark-pulse fit** — a flat level plus a few pulses of one common shape:
 
@@ -457,7 +455,7 @@ WCMD has `base_even` / `base_odd`.
 #### Dark-pulse fit
 
 On the pedestal tree every channel is fitted over the whole record; on the
-normal tree over `window_normal` (the fit that gives `qbase`).  The model is a
+normal tree over `window_normal`; on both it is the fit that gives `qbase`.  The model is a
 flat level plus n Moyal pulses of a common width (`DarkFit` in
 `produce_iadc.cc`, settings under `pedestal.fit`, the same algorithm as the
 python one in `../view_waveform_iadc.py`; steps in *Algorithm* above).  The point is

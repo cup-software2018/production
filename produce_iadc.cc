@@ -85,8 +85,9 @@ constexpr double kCF = 0.5; // constant fraction for the leading-edge time
 // taken against header + qbase.  On run 263 window_normal is only [0, 14), so
 // the fit has few samples to work with; the longer records of the following
 // runs give it a real pre-signal region.  A failed fit falls back to qbase 0.
-// The pedestal tree takes its charge level the same way, so that it stays the
-// noise reference of the normal tree.
+// The pedestal tree takes its charge level from the fit over the whole record,
+// the same fit that gives its dark pulses: with no light in it, the record is
+// all baseline.
 //
 // normal.baseline: header uses the ADC header pedestal alone (qbase 0).  Why
 // that was the first choice, on run 263:
@@ -159,8 +160,7 @@ bool LoadConfig(const char * path, Config & c)
   return true;
 }
 
-// What both trees measure on a channel, with the same algorithm, so the
-// pedestal tree is a direct noise reference for the normal one.  As in the
+// What both trees measure on a channel, with the same algorithm.  As in the
 // WCMD production, `base` and `rms` come from window_normal on normal triggers
 // and from window_pedestal (by default the whole record) on pedestal ones.
 // There is no even/odd split: the IADC shows none (even - odd 0.00 +- 0.47 ADC
@@ -661,14 +661,14 @@ int produce(const char * in, const char * out, const char * cfgPath)
       for (int k = 0; k < nd; k++)
         y[k] = wv[k] - hped;
 
-      // the level under the charge: the same procedure on both trees, so the
-      // pedestal tree stays the noise reference of the normal one
+      // the level under the charge: the dark-pulse fit over window_normal on a
+      // normal trigger, over the whole record on a pedestal one, which has no
+      // light; one fit gives both the level and the dark pulses
       double lvl = 0;
       DarkFitResult fn;
-      if (cfg.normFit) {
-        fn = fitter.Fit(y, cfg.normLo, cfg.normHi);
-        if (fn.ok) lvl = fn.b; // a failed fit falls back to the header pedestal
-      }
+      if (isPed ? (cfg.fit || cfg.normFit) : cfg.normFit)
+        fn = isPed ? fitter.Fit(y, 0, nd) : fitter.Fit(y, cfg.normLo, cfg.normHi);
+      if (cfg.normFit && fn.ok) lvl = fn.b; // a failed fit falls back to the header pedestal
       const ChanResult r = isPed ? Measure(wv, hped + lvl, pedLo, pHi, cfg)
                                  : Measure(wv, hped + lvl, cfg.normLo, cfg.normHi, cfg);
       qbase[nch] = lvl;
@@ -683,7 +683,7 @@ int produce(const char * in, const char * out, const char * cfgPath)
       tlead[nch] = r.tlead;
       charge[nch] = r.charge;
       if (isPed ? cfg.fit : cfg.normFit) {
-        const DarkFitResult f = isPed ? fitter.Fit(y, 0, nd) : fn;
+        const DarkFitResult & f = fn;
         fit_base[nch] = f.ok ? f.b : 0;
         fit_sigma[nch] = f.ok ? f.sigma : 0;
         fit_chi2[nch] = f.ok ? f.chi2ndf : -1;

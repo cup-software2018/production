@@ -76,6 +76,8 @@ constexpr int kMaxCh = 520;
 constexpr int kBaseLoDef = 0, kBaseHiDef = 14; // baseline region, normal triggers
 constexpr int kIntLoDef = 16, kIntHiDef = 48;
 constexpr double kCF = 0.5; // constant fraction for the leading-edge time
+constexpr double kSampleNs = 16.0; // IADC sample period
+constexpr int kAdcCeiling = 4095;  // 12-bit ADC: samples here are clipped
 
 // ── Baseline ───────────────────────────────────────────────────────────────
 // normal.baseline: fit (the default) takes the level from the dark-pulse fit
@@ -166,14 +168,17 @@ bool LoadConfig(const char * path, Config & c)
 // There is no even/odd split: the IADC shows none (even - odd 0.00 +- 0.47 ADC
 // on pedestal triggers), so `base` stands where the WCMD has base_even/odd.
 struct ChanResult {
-  float base, rms, qpre;     // baseline region
-  float hmax, tlead, charge; // integration window
+  float base, rms, qpre;          // baseline region
+  float hmax, tlead, tcf, charge; // integration window
   short hmaxx;
+  short nsat; // samples of the record at the ADC ceiling
 };
 
-ChanResult Measure(const unsigned short * w, double ped, int lo, int hi, const Config & c)
+ChanResult Measure(const unsigned short * w, int nd, double ped, int lo, int hi, const Config & c)
 {
   ChanResult r{};
+  for (int i = 0; i < nd; i++)
+    if (w[i] >= kAdcCeiling) r.nsat++;
   double s = 0, s2 = 0;
   for (int i = lo; i < hi; i++) {
     s += w[i];
@@ -211,6 +216,31 @@ ChanResult Measure(const unsigned short * w, double ped, int lo, int hi, const C
         r.tlead = (i - 1) + (lvl - a) / (b - a);
         break;
       }
+    }
+  }
+
+  // tcf: the same cf x hmax crossing, but found walking down from the peak, so a
+  // smaller pulse earlier in the window cannot take it, and allowed in front of
+  // the integration window; ns from the start of the record.  On raw run 263
+  // (subruns 1-10, 112k modules with four clean pulses) this is the best of the
+  // estimators tried -- a template fit, a fixed-width Gaussian rising edge, the
+  // sqrt(-ln) line fit -- with (t0 + t1)/2 - (t2 + t3)/2 at 2.9 ns robust sigma
+  // (1.7 ns for amplitudes above 1100 ADC) on 16 ns samples.
+  //
+  // Not on a saturated waveform (nsat > 0): hmax is the ceiling there, not the
+  // pulse height, and the crossing comes out early, by up to ~20 ns.  Those are
+  // muons -- on run 263 none of 289 M modules below 150 p.e. has a clipped
+  // sample, 0.5% at 150-250 p.e., nearly all above 400 -- so no arrival time is
+  // needed to tell them from random gamma coincidences.
+  r.tcf = -1;
+  if (hm > 0 && r.nsat == 0) {
+    const double lvl = c.cf * hm;
+    int k = hx;
+    while (k > 0 && w[k - 1] - ped > lvl)
+      k--;
+    if (k > 0) {
+      const double a = w[k - 1] - ped, b = w[k] - ped;
+      r.tcf = kSampleNs * ((k - 1) + (lvl - a) / (b - a));
     }
   }
   return r;
@@ -572,13 +602,14 @@ int produce(const char * in, const char * out, const char * cfgPath)
   // the same type, as in the WCMD production:
   //
   //   per event    subrun evtNum trgNum trgTime nch      (+ run nhit nmod on normal)
-  //   per channel  pid tbit ped base rms qpre hmax hmaxx tlead charge
+  //   per channel  pid tbit ped base rms qpre hmax hmaxx tlead tcf nsat charge
   Int_t runNo = run, subrun = sub, nch = 0, nhit = 0, nmod = 0;
   UInt_t evtNum = 0, trgNum = 0;
   ULong64_t trgTime = 0;
-  Short_t pid[kMaxCh], hmaxx[kMaxCh];
+  Short_t pid[kMaxCh], hmaxx[kMaxCh], nsat[kMaxCh];
   UShort_t tbit[kMaxCh], ped[kMaxCh];
-  Float_t base[kMaxCh], rms[kMaxCh], qpre[kMaxCh], hmax[kMaxCh], tlead[kMaxCh], charge[kMaxCh];
+  Float_t base[kMaxCh], rms[kMaxCh], qpre[kMaxCh], hmax[kMaxCh], tlead[kMaxCh], tcf[kMaxCh];
+  Float_t charge[kMaxCh];
   Float_t qbase[kMaxCh]; // ADC over ped: the level charge, hmax, tlead and qpre are taken against
 
   // the dark-pulse fit, per channel and per pulse: over window_normal on the
@@ -615,6 +646,8 @@ int produce(const char * in, const char * out, const char * cfgPath)
     t->Branch("hmax", hmax, "hmax[nch]/F");       // ADC over ped, in the integration window
     t->Branch("hmaxx", hmaxx, "hmaxx[nch]/S");    // where it is
     t->Branch("tlead", tlead, "tlead[nch]/F");    // sample, cf crossing; -1 if none
+    t->Branch("tcf", tcf, "tcf[nch]/F");          // ns, cf crossing walking down from the peak; -1 if none or saturated
+    t->Branch("nsat", nsat, "nsat[nch]/S");       // samples at the ADC ceiling (4095); > 0 = saturated
     t->Branch("charge", charge, "charge[nch]/F"); // ADC x sample, integration window over qbase
     t->Branch("qbase", qbase, "qbase[nch]/F");    // ADC over ped, the level of the line above
     if (isPed ? cfg.fit : cfg.normFit) {
@@ -669,8 +702,8 @@ int produce(const char * in, const char * out, const char * cfgPath)
       if (isPed ? (cfg.fit || cfg.normFit) : cfg.normFit)
         fn = isPed ? fitter.Fit(y, 0, nd) : fitter.Fit(y, cfg.normLo, cfg.normHi);
       if (cfg.normFit && fn.ok) lvl = fn.b; // a failed fit falls back to the header pedestal
-      const ChanResult r = isPed ? Measure(wv, hped + lvl, pedLo, pHi, cfg)
-                                 : Measure(wv, hped + lvl, cfg.normLo, cfg.normHi, cfg);
+      const ChanResult r = isPed ? Measure(wv, nd, hped + lvl, pedLo, pHi, cfg)
+                                 : Measure(wv, nd, hped + lvl, cfg.normLo, cfg.normHi, cfg);
       qbase[nch] = lvl;
       pid[nch] = ch->GetID();
       tbit[nch] = ch->GetBit();
@@ -681,6 +714,8 @@ int produce(const char * in, const char * out, const char * cfgPath)
       hmax[nch] = r.hmax;
       hmaxx[nch] = r.hmaxx;
       tlead[nch] = r.tlead;
+      tcf[nch] = r.tcf;
+      nsat[nch] = r.nsat;
       charge[nch] = r.charge;
       if (isPed ? cfg.fit : cfg.normFit) {
         const DarkFitResult & f = fn;
@@ -720,7 +755,8 @@ int produce(const char * in, const char * out, const char * cfgPath)
   TNamed("baseline", cfg.normFit ? "header pedestal + dark-pulse fit over window_normal (qbase)"
                                  : "header pedestal")
       .Write();
-  TNamed("sample_ns", "16").Write();
+  TNamed("sample_ns", Form("%g", kSampleNs)).Write();
+  TNamed("adc_ceiling", Form("%d", kAdcCeiling)).Write();
   TNamed("pedestal_fit", cfg.fit
                              ? Form("moyal+flat: sigma_e %.2f seed %.2f add %.2f dchi2 %.1f max %d "
                                     "width [%.2f,%.2f] mu_min %.1f keep_h %.2f",

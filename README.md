@@ -397,7 +397,17 @@ Per channel:
    * sum over `integration` → `charge`; the largest sample and where →
      `hmax`, `hmaxx`;
    * the first point on the rising edge where the waveform crosses `cf` ×
-     `hmax`, interpolated between samples → `tlead` (−1 if none).
+     `hmax`, interpolated between samples → `tlead` (−1 if none);
+   * the same crossing found walking down from the peak, so an earlier, smaller
+     pulse cannot take it, and allowed in front of the integration window,
+     interpolated → `tcf`, in ns (−1 if none, and on a saturated waveform);  The arrival time: on run 263
+     (112k modules) (t0 + t1)/2 − (t2 + t3)/2 has a 2.9 ns robust sigma, 1.7 ns
+     above 1100 ADC, better than a template or a Gaussian rising-edge fit;
+   * the samples of the record at the 12-bit ceiling (4095) → `nsat`; on a
+     saturated waveform `hmax` is the ceiling, not the height, so `tcf` is not
+     computed there (it would come out up to ~20 ns early).  Saturation is a
+     muon matter: on run 263 no module below 150 p.e. has it, nearly every one
+     above 400 p.e. does.
 4. Copy the DAQ trigger bit → `tbit`; count the channels with it set → `nhit`,
    and the modules they belong to → `nmod`.
 5. **Dark pulses** → `fit_*`, `npul`, `pul_*`, from the same fit as step 2
@@ -426,7 +436,7 @@ Per channel:
 | `baseline.window_normal` | region in front of the signal on physics triggers |
 | `baseline.window_pedestal` | baseline region of pedestal triggers; `[0, 0]` for the whole record |
 | `normal.integration` | the signal window |
-| `normal.cf` | constant fraction for `tlead` |
+| `normal.cf` | constant fraction for `tlead` and `tcf` |
 | `normal.baseline` | `fit` (dark-pulse fit level, the default) or `header` (header pedestal alone) |
 | `pedestal.fit.*` | the dark-pulse fit: `enabled`, `sigma_e`, `seed_height`, `add_residual`, `add_dchi2`, `max_pulses` (≤ 12), `sigma_range`, `mu_min`, `keep_height` |
 
@@ -447,6 +457,8 @@ both trees:
 | `qpre` | ADC·sample | Σ (w − ped − qbase) over `window_normal`: pile-up from an earlier pulse |
 | `hmax`, `hmaxx` | ADC, sample | largest sample over ped + qbase inside the integration window and where |
 | `tlead` | sample | constant-fraction crossing on the rising edge, −1 if none |
+| `tcf` | ns | arrival time: the same crossing found from the peak down, anywhere in the record; −1 if none or if saturated |
+| `nsat` | | samples of the record at the ADC ceiling (4095); > 0 = saturated |
 | `charge` | ADC·sample | as above |
 
 There is no even/odd split: the IADC shows none, so `base` stands where the

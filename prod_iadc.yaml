@@ -18,7 +18,7 @@ normal:
   # Holds 99.8% of the mean pulse; pedestal rms 388 against 451 for [14, 56).
   integration: [16, 48]
 
-  # Constant fraction of hmax for the leading-edge time `tlead`.
+  # Constant fraction of hmax for the leading-edge times `tlead` and `tcf`.
   cf: 0.5
 
   # The level under the charge.  fit: a flat level plus the dark pulses in

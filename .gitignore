@@ -6,6 +6,7 @@ old/
 
 # Production output and logs
 out
+out_local/
 test_out/
 *.root
 *.log

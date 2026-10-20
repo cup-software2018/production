@@ -10,6 +10,7 @@ out_local/
 test_out/
 *.root
 *.log
+__pycache__/
 
 # Editor / local history
 .lh/

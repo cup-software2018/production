@@ -165,6 +165,10 @@ below (a record too short for the windows is skipped and counted).
    4. sum the samples they cover → `charge`.
    No pulse found means `charge` = 0 exactly.
 5. Copy the DAQ trigger bit → `tbit`; count the channels with it set → `nhit`.
+6. **Dark.**  Run the pulse finder of step 4 over the baseline region
+   (`window_normal`) and sum what it finds → `dark_q`, 0 if nothing.  The front
+   of the record is delayed ahead of the trigger and holds no light, so these
+   are dark pulses of every channel, whatever its `tbit`: the gain reference.
 
 **Pedestal trigger** — per channel (no light, so the whole record is used):
 
@@ -181,6 +185,8 @@ below (a record too short for the windows is skipped and counted).
 6. **Window charges.**  For each `(head, tail)` in `windows`, sum
    `[peak − head, peak + tail]` → `q_<head>_<tail>`, and the same window at the
    pulse-free position → `qp_<head>_<tail>`, the noise reference.
+7. **Dark.**  The same pulse finder over `window_pedestal` → `dark_q`, so both
+   trees carry it under one definition.
 
 Several input files are read as one chain; with `--split` the output rolls
 over to a new file past the given size.
@@ -266,6 +272,7 @@ Per channel, all of length `nch` and indexed the same way as `pid`:
 | `charge` | `Float_t` | ADC×sample | **sum over the pulses found** in the integration window |
 | `qwin` | `Float_t` | ADC×sample | plain integral of the whole window |
 | `npul` | `Short_t` | | pulses the finder separated inside the window |
+| `dark_q` | `Float_t` | ADC×sample | sum of the pulses found in the baseline region, 0 if none: the dark (gain) sample |
 
 `nhit` is nothing but the count of channels the DAQ itself called hit, so it
 can be compared with the trigger's own multiplicity requirement without
@@ -307,6 +314,7 @@ Per channel, all of length `nch` and indexed the same way as `pid`:
 | `q_<head>_<tail>` | `Float_t` | ADC×sample | charge over `[peak-head, peak+tail]`, one per window |
 | `qp_<head>_<tail>` | `Float_t` | ADC×sample | the same integrator at a pulse-free position |
 | `qp_pos` | `Short_t` | sample | where that position was |
+| `dark_q` | `Float_t` | ADC×sample | sum of the pulses found in `window_pedestal`, as in the normal tree |
 
 `hmax` and `hmaxx` are the one pair whose shared name hides a difference: here
 the peak is searched over the whole of `hmax_range`, because a pedestal record

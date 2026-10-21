@@ -79,6 +79,17 @@ normal:
     pre: 3
     post: 21
 
+  # The same finder also gives the gain reference, `dark_q` in both trees: the
+  # sum of the pulses it finds in a region with no light -- the baseline region
+  # above for the normal triggers, the pedestal baseline region (the whole
+  # record) for the pedestal ones -- 0 when there is none.  The front of a
+  # normal-trigger record is delayed ahead of the trigger and is dark to the
+  # photoelectron: on run 263 the first discriminator crossings stay at the
+  # dark level up to sample 208, and every channel is used whatever its tbit,
+  # since the discriminator watches the whole record and a dark pulse in the
+  # front sets tbit by itself.  The single-photoelectron peak of its spectrum
+  # gives the gain.
+
 pedestal:
   # (head, tail) in samples either side of the peak, the peak included, so
   # [2, 6] covers 9 samples.  Five of them are kept because which one is best

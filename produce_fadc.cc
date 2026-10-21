@@ -180,8 +180,34 @@ constexpr int kPulsePost = 21;      // samples added after each excursion
 //
 // Note for gain work: tbit already truncates the low-charge side of the SPE
 // peak - its efficiency is 0.21 at charge 30-40, 0.64 at 40-50, 0.87 at 50-58 -
-// so the SPE mode and mean come out 5% and 9% high compared with `npul > 0 &&
-// charge > 25`.  Use that selection instead when calibrating gain.
+// so the signal-window charge is not a gain reference.  Use `dark_q` below.
+
+// ── Dark pulses ────────────────────────────────────────────────────────────
+// `dark_q` is the gain reference: the pulse finder of the charge (`nsigma`,
+// `pre`, `post`) run over a region with no light, and the sum of the pulses it
+// finds there, 0 when there is none.  A dark pulse comes every ~140 us per
+// channel, so a region of a few hundred ns holds one at most, and dark_q is
+// that pulse's charge.  Its spectrum is the noise the threshold lets through
+// plus the single-photoelectron peak, whose mean is the gain (no offset).
+//
+// Normal triggers: the region is the baseline region [normLo, normHi).  The
+// front of the record is delayed ahead of the trigger and holds no light: on
+// run 263 the first discriminator crossings are flat at the dark level up to
+// sample 208 and rise only from there, the trigger forming at 297 (median of
+// the 5th crossing), and below the discriminator the dark rate in front of a
+// tbit = 1 channel is the same as in front of a tbit = 0 one (4.5 vs 4.9 kHz).
+// tbit is not a selection here: the discriminator watches the whole record, so
+// a dark pulse above it in the front sets tbit itself, and splitting on tbit
+// only moves those pulses from one side to the other.  Behind the signal sit
+// the AC-coupling undershoot and afterpulses, so only the front is used.
+//
+// Pedestal triggers: the pedestal baseline region, the whole record by default.
+//
+// On run 263 subruns 1-10 the fit (noise + 1 + 2 p.e.) gives a 1 p.e. mean of
+// 36.3 ADC*sample (median over the 47 tank PMTs, spread 4.3%) at a 7 kHz dark
+// rate.  Integrating a fixed window around the largest sample of the region
+// instead, with no threshold, agrees within 2.4% but stores a noise value for
+// every channel and record (+16% of output against ~0 for this).
 
 constexpr double kHitCharge = 25.0; // ADC x samples
 constexpr double kClipSigma = 4.0;  // pedestal outlier rejection
@@ -506,6 +532,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
                           : "(single file, no split)");
   printf("normal   : baseline [%d,%d)  integration [%d,%d)  pulses %.1f sigma (-%d,+%d)\n",
          cfg.normLo, cfg.normHi, cfg.intLo, cfg.intHi, cfg.nsigma, cfg.pre, cfg.post);
+  printf("dark     : pulses in the baseline region, normal and pedestal\n");
   printf("pedestal : baseline %s minus [peak%+d,peak%+d)  peak in [%d,%d)  windows",
          cfg.pedHi > 0 ? Form("[%d,%d)", cfg.pedLo, cfg.pedHi) : "the whole record", cfg.exclLo,
          cfg.exclHi, cfg.hmaxLo, cfg.hmaxHi);
@@ -518,7 +545,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
   // the same type, so code that reads one reads the other.
   //
   //   per event    subrun evtNum trgNum trgTime nch      (+ nhit on normal)
-  //   per channel  pid base_even base_odd rms hmax hmaxx
+  //   per channel  pid base_even base_odd rms hmax hmaxx dark_q
   //
   // What is left is what only one of them measures.
 
@@ -529,7 +556,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
   Short_t pid[kMaxCh], hmaxx[kMaxCh], npul[kMaxCh];
   UShort_t tbit[kMaxCh];
   Float_t base_even[kMaxCh], base_odd[kMaxCh], rms[kMaxCh];
-  Float_t charge[kMaxCh], qwin[kMaxCh], hmax[kMaxCh];
+  Float_t charge[kMaxCh], qwin[kMaxCh], hmax[kMaxCh], dark_q[kMaxCh];
 
   // ── pedestal ──
   Int_t p_subrun = 0, p_nch = 0;
@@ -537,6 +564,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
   ULong64_t p_trgTime = 0;
   Short_t p_pid[kMaxCh], p_hmaxx[kMaxCh], p_gap2[kMaxCh], p_qppos[kMaxCh];
   Float_t p_hmax[kMaxCh], p_hmax2[kMaxCh], p_be[kMaxCh], p_bo[kMaxCh], p_rms[kMaxCh];
+  Float_t p_dark[kMaxCh];
   Float_t p_q[kMaxWin][kMaxCh], p_qp[kMaxWin][kMaxCh];
   const int nwin = cfg.windows.size();
 
@@ -574,6 +602,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
     tnorm->Branch("charge", charge, "charge[nch]/F"); // ADC x samples, sum of found pulses
     tnorm->Branch("qwin", qwin, "qwin[nch]/F");       // ADC x samples, plain window integral
     tnorm->Branch("npul", npul, "npul[nch]/S");       // pulses found in the window
+    tnorm->Branch("dark_q", dark_q, "dark_q[nch]/F"); // ADC x samples, sum of pulses in the baseline region
 
     tped = new TTree("pedestal", "WCMD pedestal-trigger production");
     tped->Branch("nch", &p_nch, "nch/I");
@@ -590,6 +619,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
     tped->Branch("hmax2", p_hmax2, "hmax2[nch]/F");   // next largest, well away from the peak
     tped->Branch("gap2", p_gap2, "gap2[nch]/S");      // signed distance to it
     tped->Branch("qp_pos", p_qppos, "qp_pos[nch]/S"); // where the pulse-free gate was put
+    tped->Branch("dark_q", p_dark, "dark_q[nch]/F");  // ADC x samples, as the normal tree's, whole region
     for (int w = 0; w < nwin; w++) {
       const TString q = TString::Format("q_%d_%d", cfg.windows[w].first, cfg.windows[w].second);
       tped->Branch(q, p_q[w], TString::Format("%s[nch]/F", q.Data()));
@@ -611,6 +641,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
     TNamed("iters", Form("%d", cfg.iters)).Write();
     TNamed("integration", Form("[%d,%d)", cfg.intLo, cfg.intHi)).Write();
     TNamed("pulse", Form("%.2f sigma, -%d +%d", cfg.nsigma, cfg.pre, cfg.post)).Write();
+    TNamed("dark", "sum of the pulses (as `pulse`) in the baseline region").Write();
     TNamed("hmax_range", Form("[%d,%d)", cfg.hmaxLo, cfg.hmaxHi)).Write();
     TNamed("ped_away", Form("%d", cfg.pedAway)).Write();
     TNamed("second_away", Form("%d", cfg.secondAway)).Write();
@@ -683,6 +714,10 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
         const Charge pulses =
             SumPulses(wave, bl, cfg.intLo, cfg.intHi, cfg.nsigma * bl.rms, cfg.pre, cfg.post);
 
+        // dark: the pulses in the baseline region, which holds no light
+        const Charge dark =
+            SumPulses(wave, bl, cfg.normLo, cfg.normHi, cfg.nsigma * bl.rms, cfg.pre, cfg.post);
+
         pid[nch] = static_cast<Short_t>(ch->GetID());
         tbit[nch] = ch->GetBit();
         base_even[nch] = static_cast<Float_t>(bl.even);
@@ -693,6 +728,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
         npul[nch] = static_cast<Short_t>(pulses.npulse);
         hmax[nch] = static_cast<Float_t>(amax);
         hmaxx[nch] = static_cast<Short_t>(iamax);
+        dark_q[nch] = static_cast<Float_t>(dark.q);
         nch++;
 
         if (ch->GetBit() != 0) nhit++;
@@ -770,6 +806,8 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
         p_be[p_nch] = static_cast<Float_t>(bl.even);
         p_bo[p_nch] = static_cast<Float_t>(bl.odd);
         p_rms[p_nch] = static_cast<Float_t>(bl.rms);
+        p_dark[p_nch] = static_cast<Float_t>(
+            SumPulses(wave, bl, plo, phi, cfg.nsigma * bl.rms, cfg.pre, cfg.post).q);
         for (int w = 0; w < nwin; w++) {
           const int hd = cfg.windows[w].first, tl = cfg.windows[w].second;
           double q = 0.0, qp = 0.0;

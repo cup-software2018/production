@@ -35,8 +35,8 @@ directly in `<prod>` when there is no run directory.  The driver runs steps
 ```
 
 and deletes the intermediate files.  If a step fails it stops and leaves the
-scratch directory (`work_<run>_*`) for inspection.  On run 263 (811 subruns)
-it takes about 9 minutes.
+scratch directory (`work_<run>_*`) for inspection.  A run of 811 subruns
+takes about 9 minutes.
 
 The steps can also be run one by one; every script takes `--dir DIR` (where its
 inputs are and its outputs go, the current directory by default), and those
@@ -106,7 +106,7 @@ In an analysis:
 
 ```python
 import psmd_gain
-t = psmd_gain.load("/data/amore2/data/PROD/psmd_gain/psmd_gain_263.txt")   # dict of arrays by PID-1: pid, g, c, use
+t = psmd_gain.load("/data/amore2/data/PROD/psmd_gain/psmd_gain_<run>.txt")   # dict of arrays by PID-1: pid, g, c, use
 q = psmd_gain.calibrate(charge, pid, t)    # numpy; nan where use == 0
 d = psmd_gain.define(df, t)                # RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 ```
@@ -116,26 +116,10 @@ the include path, e.g. `ROOT_INCLUDE_PATH`, or `-I`):
 
 ```cpp
 #include "psmd_gain.hh"
-psmd_gain::Table t = psmd_gain::Load("/data/amore2/data/PROD/psmd_gain/psmd_gain_263.txt");  // by PID-1: g, c, use
+psmd_gain::Table t = psmd_gain::Load("/data/amore2/data/PROD/psmd_gain/psmd_gain_<run>.txt");  // by PID-1: g, c, use
 double q = t.Calibrate(charge, pid);       // NaN where use == 0
 auto d = psmd_gain::Define(df, t);         // RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 ```
 
 Both also give the production file glob of a run, `prod_files(prod, run)` /
 `psmd_gain::ProdFiles(prod, run)`.
-
-## Run 263
-
-| | |
-|---|---|
-| live channels | 407 (dead: PID 205–260, 465–520 no SiPM; PID 290) |
-| g | median 304.2 ADC·sample/p.e., channel spread 3.8 %, statistical error 0.15 % |
-| after g | clean-muon response vs gain: correlation 0.42 → −0.07 |
-| c | 399 channels with their own c (median 610 clean muons), spread 7.2 %, range 0.67–1.39 |
-| odd-subrun check | channel response spread 7.53 % (g only) → 4.51 % (g and c), against 4.48 % even-vs-odd reproducibility, i.e. down to the statistics |
-| use = 1 | 396 channels; live but use = 0: PID 285–289, 291, 292, 297–300 |
-
-The gains are run averages.  Within run 263 (33.8 days, one fit per day) the
-common drift is 0.14 % rms and each channel varies by 0.34 % rms (median; fit
-error 0.23 %), far below the 4.5 % statistical limit of the matching, so no
-time-dependent gain matching is done (PSMD/gain_stability/gain_vs_time.py).

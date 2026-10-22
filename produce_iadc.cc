@@ -1,15 +1,9 @@
-// Pulse production for the AMoRE PSMD (plastic scintillator muon detector),
-// read out by the NKIADC64 boards, i.e. the IADC_<run>.root.<subrun> files.
+// Pulse production for the AMoRE PSMD (NKIADC64, 16 ns/sample).  Two trees,
+// `normal` and `pedestal` (0.1 Hz random trigger), names as in produce_fadc.cc.
+// Algorithm, settings and output: README.md.
 //
-// Usage — one raw subrun file in, one output file out (prod.sh decides both
-// for a run):
-//   produce_iadc -c prod_iadc.yaml -o out/prod_IADC_000263.00001.root
-//                /data/amore2/data/RAW/000263/IADC_000263.root.00001
-//
-// Run and subrun are read from the DAQ's file name, IADC_<run>.root.<subrun>.
-// The output has two trees, `normal` for the normal triggers and `pedestal`
-// for the 0.1 Hz forced ones.
-// Names follow the FADC (WCMD) production, produce_fadc.cc beside it.
+//   produce_iadc -c prod_iadc.yaml -o out/prod_IADC_<run>.<sub>.root
+//                /data/amore2/data/RAW/<run>/IADC_<run>.root.<sub>
 
 #include <algorithm>
 #include <cmath>
@@ -33,75 +27,20 @@
 #include "common.hh"
 #include "yaml-cpp/yaml.h"
 
-// ── The readout ────────────────────────────────────────────────────────────
-// The IADC goes through the same writer as the FADC (CupDAQManager_write_root
-// .cc), so a file holds FChannel waveforms, not AChannel charges.  12-bit ADC,
-// positive pulses.  NDP = 8 x RL - 2 = 62 at RL 8 (CupDAQManager.hh GetNDP).
-// One RL unit is 128 ns on every Notice board (64 samples on the 2 ns FADC500,
-// 16 on the 8 ns GADC), so the 8 IADC samples per unit make 16 ns a sample
-// and a record 992 ns.  That is inferred from the register layout, not from a
-// datasheet.
-//
-// Zero suppression is on (ZSU), so a physics event carries only the channels
-// that crossed threshold: in run 263, subrun 1, 356 837 of 356 872 physics
-// events have exactly 4 channels, all from one module, all with the trigger
-// bit set.  The 360 pedestal triggers per hour carry all 520 channels.
-// The record length is read from each channel (62 in run 263; later runs are longer).
+// FChannel waveforms, 12-bit, NDP = 8 RL - 2, read per channel.
+// Zero suppression: physics events carry only the channels that fired.
 constexpr int kMaxNdp = 4096; // buffer size: longer records are cut here
 constexpr int kMaxCh = 520;
 
-// ── Windows ────────────────────────────────────────────────────────────────
-// Mean pulse of the physics channels, normalised to its peak (run 263 sub 1):
-//
-//   sample  17    18    19    20    21    22    23    24    25    26    28    32    40    48
-//   shape  .008  .022  .061  .159  .347  .607  .849  .986  1.00  .923  .663  .218  .053  .003
-//
-// so nothing before 16, the peak at 24-25 and back to zero by ~50.  Charge held
-// and the width of the same sum on pedestal triggers, where it should be 0:
-//
-//   window     samples  held    pedestal rms
-//   [14, 56)     42     1.000      451
-//   [16, 48)     32     0.998      388
-//   [16, 44)     28     0.995      359
-//   [17, 40)     23     0.982      318
-//   [18, 36)     18     0.947      272
-//
-// [16, 48) gives up 0.2% for 14% less noise; shorter windows start cutting
-// into a tail whose length grows with the pulse, the non-linearity that the
-// WCMD integration window ran into.
-//
-// [0, 14) is in front of every pulse and is kept as a diagnostic (`base`,
-// `rms`, `qpre`): 18% of physics channels show a falling slope of more than
-// 20 ADC across it, the tail of an earlier pulse.
+// Built-in defaults; prod_iadc.yaml overrides them.
 constexpr int kBaseLoDef = 0, kBaseHiDef = 14; // baseline region, normal triggers
 constexpr int kIntLoDef = 16, kIntHiDef = 48;
 constexpr double kCF = 0.5; // constant fraction for the leading-edge time
 constexpr double kSampleNs = 16.0; // IADC sample period
 constexpr int kAdcCeiling = 4095;  // 12-bit ADC: samples here are clipped
 
-// ── Baseline ───────────────────────────────────────────────────────────────
-// normal.baseline: fit (the default) takes the level from the dark-pulse fit
-// (DarkFit, below) over window_normal: a flat level plus the dark pulses that
-// sit in front of the signal, so they no longer lift it.  The level is stored
-// as `qbase`, ADC over the header pedestal, and charge, hmax, tlead and qpre are
-// taken against header + qbase.  On run 263 window_normal is only [0, 14), so
-// the fit has few samples to work with; the longer records of the following
-// runs give it a real pre-signal region.  A failed fit falls back to qbase 0.
-// The pedestal tree takes its charge level from the fit over the whole record,
-// the same fit that gives its dark pulses: with no light in it, the record is
-// all baseline.
-//
-// normal.baseline: header uses the ADC header pedestal alone (qbase 0).  Why
-// that was the first choice, on run 263:
-//
-// The charge is measured against the pedestal in the ADC header, not against
-// the front of the record.  On pedestal triggers the [14,56) sum has an rms of
-// 448 that way, against 781 with the mean of [0,14) and 796 with its median:
-// the SiPMs are noisy (in-record rms 14-16 ADC, dark pulses of ~37 ADC) and 14
-// samples are too few to pin a level down.  The header value tracks the record
-// (record mean minus header: 0.69 ADC on average, 0.47 spread over channels)
-// and moves by at most 1.3 ADC over an hour, so it is the better reference.
-
+// Charge level: header pedestal + qbase, qbase from the dark-pulse fit over
+// window_normal (normal.baseline: fit; 0 if it fails) or 0 (header).
 struct Config {
   int normLo = kBaseLoDef, normHi = kBaseHiDef; // normal: region the level comes from
   int pedLo = 0, pedHi = 0;                     // pedestal: same, 0 for the whole record
@@ -162,11 +101,7 @@ bool LoadConfig(const char * path, Config & c)
   return true;
 }
 
-// What both trees measure on a channel, with the same algorithm.  As in the
-// WCMD production, `base` and `rms` come from window_normal on normal triggers
-// and from window_pedestal (by default the whole record) on pedestal ones.
-// There is no even/odd split: the IADC shows none (even - odd 0.00 +- 0.47 ADC
-// on pedestal triggers), so `base` stands where the WCMD has base_even/odd.
+// What both trees measure on a channel; no even/odd split (the IADC has none).
 struct ChanResult {
   float base, rms, qpre;          // baseline region
   float hmax, tlead, tcf, charge; // integration window
@@ -219,19 +154,8 @@ ChanResult Measure(const unsigned short * w, int nd, double ped, int lo, int hi,
     }
   }
 
-  // tcf: the same cf x hmax crossing, but found walking down from the peak, so a
-  // smaller pulse earlier in the window cannot take it, and allowed in front of
-  // the integration window; ns from the start of the record.  On raw run 263
-  // (subruns 1-10, 112k modules with four clean pulses) this is the best of the
-  // estimators tried -- a template fit, a fixed-width Gaussian rising edge, the
-  // sqrt(-ln) line fit -- with (t0 + t1)/2 - (t2 + t3)/2 at 2.9 ns robust sigma
-  // (1.7 ns for amplitudes above 1100 ADC) on 16 ns samples.
-  //
-  // Not on a saturated waveform (nsat > 0): hmax is the ceiling there, not the
-  // pulse height, and the crossing comes out early, by up to ~20 ns.  Those are
-  // muons -- on run 263 none of 289 M modules below 150 p.e. has a clipped
-  // sample, 0.5% at 150-250 p.e., nearly all above 400 -- so no arrival time is
-  // needed to tell them from random gamma coincidences.
+  // tcf: the cf crossing walking down from the peak (an earlier, smaller pulse
+  // cannot take it), allowed before the window, in ns; not when saturated.
   r.tcf = -1;
   if (hm > 0 && r.nsat == 0) {
     const double lvl = c.cf * hm;
@@ -246,31 +170,12 @@ ChanResult Measure(const unsigned short * w, int nd, double ped, int lo, int hi,
   return r;
 }
 
-// ── Dark-pulse fit (pedestal triggers) ─────────────────────────────────────
-// A pedestal-trigger record holds no light, only SiPM dark pulses (~2.4 MHz,
-// so ~2.4 of them per 992 ns record) on a flat level.  Each channel is fitted
-// as that level plus n pulses of a common Moyal shape,
-//
+// ── Dark-pulse fit ─────────────────────────────────────────────────────────
+// Flat level + n Moyal pulses of a common width,
 //   b + sum_i H_i exp(-(z_i + exp(-z_i))/2 + 1/2),    z_i = (t - mu_i) / sigma
-//
-// normalised so that H_i is the pulse height; its area is
-// H sigma sqrt(2 pi) e^(1/2) = 4.1327 H sigma, which for sigma 1.82 gives an
-// area/height of 7.5 samples against the 7.56 measured between the charge and
-// amplitude gains of the dark fingers.  The width is shared by every pulse in a
-// record and held to [1.4, 2.4] samples: clean fits give 1.7-1.9, and left free
-// two close pulses get fitted as one wide one and drag the others with them.
-//
-// n: peaks over the clipped level (scipy-style find_peaks: height seedH,
-// prominence 0.8 seedH, distance 3), plus a pulse just before the record if it
-// opens on a falling tail and one just after if it closes on a rising edge;
-// then one pulse at a time where the residual is largest, kept only if it buys
-// addDchi2.  Pulses below keepH (0.15 p.e.) are dropped from the output.  On
-// 2000 records of run 263 subrun 1 (the python version in view_waveform_iadc
-// .py): no failures, chi2/ndf median 0.74 (noise taken as white sigmaE, it is
-// in fact correlated, lag-1 0.7), 2.9% above 2.
-//
-// Levenberg-Marquardt with analytic derivatives and parameters clamped to their
-// bounds; a fit is 62 samples and at most 2 + 2 x 12 parameters.
+// area 4.1327 H sigma.  Seeds from find_peaks, then one pulse at a time where
+// the residual is largest if it buys addDchi2; Levenberg-Marquardt with analytic
+// derivatives, parameters clamped to their bounds.
 constexpr double kMoyalArea = 4.1327; // sqrt(2 pi) e^(1/2)
 
 struct DarkPulse {
@@ -598,11 +503,7 @@ int produce(const char * in, const char * out, const char * cfgPath)
     return 1;
   }
 
-  // The two trees share every quantity they both have, under the same name and
-  // the same type, as in the WCMD production:
-  //
-  //   per event    subrun evtNum trgNum trgTime nch      (+ run nhit nmod on normal)
-  //   per channel  pid tbit ped base rms qpre hmax hmaxx tlead tcf nsat charge
+  // Shared quantities have the same name and type in both trees.
   Int_t runNo = run, subrun = sub, nch = 0, nhit = 0, nmod = 0;
   UInt_t evtNum = 0, trgNum = 0;
   ULong64_t trgTime = 0;
@@ -694,9 +595,7 @@ int produce(const char * in, const char * out, const char * cfgPath)
       for (int k = 0; k < nd; k++)
         y[k] = wv[k] - hped;
 
-      // the level under the charge: the dark-pulse fit over window_normal on a
-      // normal trigger, over the whole record on a pedestal one, which has no
-      // light; one fit gives both the level and the dark pulses
+      // one fit gives the level and the dark pulses
       double lvl = 0;
       DarkFitResult fn;
       if (isPed ? (cfg.fit || cfg.normFit) : cfg.normFit)

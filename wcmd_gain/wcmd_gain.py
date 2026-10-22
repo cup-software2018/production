@@ -3,7 +3,7 @@
     q = charge / g[pid-1]                 in photoelectrons
 
     import wcmd_gain
-    t = wcmd_gain.load("wcmd_gain_263.txt")    # dict of arrays by PID-1: pid, g, use
+    t = wcmd_gain.load("wcmd_gain_<run>.txt")    # dict of arrays by PID-1: pid, g, use
     q = wcmd_gain.calibrate(charge, pid, t)    # numpy; nan where use == 0
     d = wcmd_gain.define(df, t)                # RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 """

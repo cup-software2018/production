@@ -2,13 +2,13 @@
 # Run the production over a run on the Slurm cluster, one job per subrun,
 # each job producing FADC1, FADC2 and the IADC of its subrun in turn.
 #
-#   ./submit.sh [run] [njobs] [from] [to]
+#   ./submit.sh <run> [njobs] [from] [to]
 #
-# Defaults: run 263, 8 at a time, every subrun with raw data for any detector.
+# Defaults: 8 at a time, every subrun with raw data for any detector.
 #
-#   ./submit.sh 263 8                every subrun of run 263
-#   ./submit.sh 263 8 0 600          subruns 0..600 only
-#   CFG_FADC=scan.yaml ./submit.sh 263 8 0 9
+#   ./submit.sh <run> 8              every subrun of the run
+#   ./submit.sh <run> 8 0 600        subruns 0..600 only
+#   CFG_FADC=scan.yaml ./submit.sh <run> 8 0 9
 #
 # CFG_FADC and CFG_IADC replace prod_fadc.yaml and prod_iadc.yaml for this
 # submission.  Each Slurm task runs prod_all.sh for one subrun, which runs
@@ -32,12 +32,12 @@
 
 set -u
 
-RUN=${1:-263}
+RUN=${1:-}
 NJOBS=${2:-8}
 FROM=${3:--1}
 TO=${4:--1}
 if ! [[ "$RUN" =~ ^[0-9]+$ && "$NJOBS" =~ ^[0-9]+$ && "$FROM" =~ ^-?[0-9]+$ && "$TO" =~ ^-?[0-9]+$ ]]; then
-  echo "usage: $0 [run] [njobs] [from] [to]"; exit 2
+  echo "usage: $0 <run> [njobs] [from] [to]"; exit 2
 fi
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

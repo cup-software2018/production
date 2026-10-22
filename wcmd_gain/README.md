@@ -30,7 +30,7 @@ scratch directory under `<prod>/wcmd_gain/`, then keeps
 ```
 
 and deletes the intermediate files. If a step fails it stops and leaves the scratch directory
-(`work_<run>_*`). On 384 subruns of run 263 it takes about 3 minutes.
+(`work_<run>_*`). 384 subruns take about 3 minutes.
 
 The steps one by one (every script takes `--dir DIR`, those reading the production `--prod DIR`):
 
@@ -47,8 +47,7 @@ before and 21 after, merged, summed) over a region with no light and stores the 
 0 when nothing is found:
 
 * **normal triggers:** the baseline region `window_normal` in front of the signal. The FADC delay
-  puts the front of every record ahead of the trigger; on run 263 (DLY 1100) the first discriminator
-  crossings stay at the dark level up to sample 208 and the trigger forms at 297. Every channel is
+  puts the front of every record ahead of the trigger, so it holds no light. Every channel is
   used whatever its `tbit`: the discriminator watches the whole record, so a dark pulse above it in
   the front sets `tbit` by itself, and splitting on `tbit` would only move those pulses.
 * **pedestal triggers:** the whole record.
@@ -67,8 +66,7 @@ The two spectra of a PMT are added and fitted (`spe.py`) over [−15, 160) ADC·
 
 the standard single-photoelectron response without Poisson weights (the An are free): the pedestal
 peak — the baseline excursions the 4σ threshold lets through — of width σp, and n photoelectrons of
-width σspe each on that width. g = μ. The baseline bias is −0.08 ADC·sample, 0.2 % of g, and the same
-in runs 251, 263, 301; it is kept in the table as the check on the no-offset assumption.
+width σspe each on that width. g = μ. The baseline bias is kept in the table as the check on the no-offset assumption.
 
 ## The table — `wcmd_gain_<run>.txt`
 
@@ -97,22 +95,20 @@ In an analysis:
 
 ```python
 import wcmd_gain
-t = wcmd_gain.load("/data/amore2/data/PROD/wcmd_gain/wcmd_gain_263.txt")   # pid, g, use by PID-1
+t = wcmd_gain.load("/data/amore2/data/PROD/wcmd_gain/wcmd_gain_<run>.txt")   # pid, g, use by PID-1
 q = wcmd_gain.calibrate(charge, pid, t)    # numpy; nan where use == 0
 d = wcmd_gain.define(df, t)                # RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 ```
 
-## Run 263 (subruns 0–383 of the local production)
+or in C++ / a ROOT macro, with the header-only `wcmd_gain.hh` (this directory on
+the include path, e.g. `ROOT_INCLUDE_PATH`, or `-I`):
 
-| | |
-|---|---|
-| g | median 36.76 ADC·sample/p.e., PMT spread 3.2 % (PMT gains set to ~6×10⁶ by HV) |
-| statistics | 0.23 % per PMT |
-| fit | χ²/ndf median 5.7; best PID 24 (1.4), worst PID 41 (11.8, the lowest gain, 32.6) |
-| stability | 10-subrun groups over 17.9 days: common drift 0.26 % rms, each PMT 1.5 % rms = its fit error |
+```cpp
+#include "wcmd_gain.hh"
+wcmd_gain::Table t = wcmd_gain::Load("/data/amore2/data/PROD/wcmd_gain/wcmd_gain_<run>.txt");  // by PID-1: g, use
+double q = t.Calibrate(charge, pid);       // NaN where use == 0
+auto d = wcmd_gain::Define(df, t);         // RDataFrame: q[nch] next to charge[nch], 0 where use == 0
+```
 
-## FADC delay
-
-From DLY 1100 to DLY 1500 the record moves by 200 samples: the front grows from 208 to 408 samples
-and doubles the dark pulses per record. For such runs the production needs `window_normal`
-[0, 400] and `integration` [432, 616] (`WCMD/delay_opt/prod_fadc_dly1500.yaml`).
+Both also give the production file glob of a run, `prod_files(prod, run, board=1)` /
+`wcmd_gain::ProdFiles(prod, run, board = 1)`.

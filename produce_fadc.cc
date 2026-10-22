@@ -1,20 +1,14 @@
-// Pulse production for the AMoRE WCMD FADC raw data.
+// Pulse production for the AMoRE WCMD FADC raw data (NKFADC500, 2 ns/sample).
+// Fills two trees: `normal` (charge = sum of found pulses in the signal window,
+// dark_q in the front) and `pedestal` (0.1 Hz random trigger: largest
+// excursion, window charges around it, dark_q over the record).
+// Algorithm, settings and output: README.md.
 //
-// For every waveform: estimate the baseline from the pedestal region at the
-// front of the readout window, subtract it, and integrate the whole
-// baseline-subtracted signal region to get the total charge in ADC counts x
-// samples (1 sample = 2 ns, NKFADC500).
+//   produce_fadc -c prod_fadc.yaml -o out/prod_FADC1_<run>.<sub>.root
+//                /data/amore2/data/RAW/<run>/FADC1_<run>.root.<sub>
 //
-// Usage — raw files in, one output file out (prod.sh decides both for a run):
-//   produce_fadc -c prod_fadc.yaml -o out/prod_FADC1_000263.00001.root
-//                /data/amore2/data/RAW/000263/FADC1_000263.root.00001
-//
-// Several inputs are chained into one output, in the order given; they must
-// all be the same run and board.  Run, board and subrun are read from the DAQ's
-// file names, FADC<b>_<run>.root.<subrun>.
-//
-// --split splits the output, rolling over to <output>_1.root, _2, ... each
-// time a file passes that many bytes; kSplitBytes (1 GB) is a sensible value.
+// Several inputs (same run and board, FADC<b>_<run>.root.<subrun>) are chained
+// into one output; --split rolls it over past that many bytes.
 
 #include <algorithm>
 #include <cmath>
@@ -39,193 +33,24 @@
 #include "common.hh"
 #include "yaml-cpp/yaml.h"
 
-// ── Channel identity ───────────────────────────────────────────────────────
-// FChannel::GetID() in these files is the PID, not the hardware CID: the DAQ
-// writes `chdata->Add(conf->PID(i), ...)` (CUPDAQ_v4.0
-// DAQ/src/CupDAQManager_write_root.cc:94).  CID repeats per FADC module
-// (fadct.yml: CID [1,2,3,4] on every module, PID [1,2,3,4], [5,6,7,8], ...)
-// and never reaches the ROOT file, so no remapping is needed or possible here.
-//
-// FChannel::GetBit() is the per-channel trigger bit from the ADC header
-// (CupDAQManager_write_root.cc:98), i.e. the DAQ's own discriminator decision.
-//
-// Run 263: FADC1 carries PID 1-48, FADC2 carries PID 49 alone.  PID 48 is not
-// connected — pure noise, trigger bit never set — but it is kept in the output
-// rather than silently dropped; cut on `tbit` or `pid` downstream.
-
-// ── Analysis windows ───────────────────────────────────────────────────────
-// Three bands, all measured on run 263.  Note the 24-sample guard band: the
-// pedestal ends at 208 and the integration starts at 232, they do not meet.
-//
-//     0 ............ 208 ... 232 ............... 416 ........... 1008
-//     |   pedestal    | guard |   integration     |   nothing
-//
-// PEDESTAL [0, 208).  The fraction of samples above 5 sigma is at the
-// accidental floor (0.004-0.04%) throughout, in all 24 subruns, and the signal
-// edge sits at sample 232 in every one of them -- the trigger position does
-// not drift over the 24 hour run.  Shortening this region only costs
-// resolution (pedestal width 37.7 at [0,208), 41.5 at [0,150), 49.4 at [0,60))
-// without buying margin, and does not shift the mean.  The ~1% of triggered
-// channels with a 5 sigma crossing before 208 are uniform in time, i.e.
-// accidental dark hits, not early light.
-//
-// GUARD [208, 232).  Belongs to neither: it is the leading edge of the signal,
-// but it carries almost nothing.  Splitting its content against a signal-free
-// reference region (to remove the baseline offset that comes from selecting
-// channels on their own charge) leaves, as real light:
-//
-//   pulse size     50-100   100-200   200-400    >400
-//   real charge      0.30      0.31      0.95   <0.40   ADC*sample
-//   as %% of total    0.4%%     0.25%%     0.36%%   0.04%%
-//
-// Integrating it would add under 0.4% of signal and 24 samples of noise
-// (pedestal width 33.5 -> 35.7), so the integration starts at the measured
-// edge instead, and the band absorbs any small drift of that edge.
-//
-// INTEGRATION [232, 416).  The light is not prompt: photoelectrons trickle in
-// over ~180 samples (~360 ns) because of the low light level and reflections
-// in the tank, so the window has to span the whole structure rather than sit
-// on the peak.  Mean cumulative charge, normalised to its own row maximum, for
-// triggered tank channels split by pulse size:
-//
-//   end sample     304    352    384    416    448    512    672
-//   q =  50-100   0.802  0.970  0.981  0.969  0.950  0.920  0.931
-//   q = 100-200   0.582  0.741  0.773  0.780  0.778  0.780  0.835
-//   q = 200-400   0.596  0.906  0.994  1.000  0.981  0.940  0.924
-//   q >     400   0.236  0.862  0.988  1.000  0.977  0.913  0.856
-//
-// Large pulses have proportionally longer tails, so a short window is not
-// merely a scale factor: cutting at 352 costs 3% on small pulses but 14% on
-// the largest, a real non-linearity.  Past ~416 the AC-coupling undershoot
-// eats the integral back (q > 400 loses 14% by sample 672), so a longer window
-// both adds noise and removes signal.  Between 384 and 416 the charge agrees
-// to within 1.2% across the dynamic range; 416 is where the two large-pulse
-// classes peak.
-//
-// The remaining cost is resolution: the pedestal width of the charge grows
-// roughly linearly with window length (~0.18 ADC per sample: 5.7 ADC*sample
-// over 20 samples, 33.5 over 184, 35.7 over 208), because the baseline wanders
-// faster than the per-sample white noise of ~1.04 ADC would suggest.  Taking
-// the baseline from both sides of the signal instead of only the front buys
-// just 14%, so window length is the only real lever -- hence these are
-// parameters, not constants, so they can be scanned.
-
-constexpr int kBaseLoDef = 0; // pedestal region [baseLo, baseHi)
+// GetID() is the PID, GetBit() the DAQ per-channel discriminator.
+// Built-in defaults (DLY 1100); prod_fadc.yaml overrides them.
+constexpr int kBaseLoDef = 0; // baseline region [baseLo, baseHi), in front of the signal
 constexpr int kBaseHiDef = 208;
 constexpr int kIntLoDef = 232; // integration region [intLo, intHi)
 constexpr int kIntHiDef = 416;
 
-// ── Trigger type ───────────────────────────────────────────────────────────
-// trgType 1 is the pedestal (random) trigger and is skipped by default.
-// Measured on run 263: consecutive type-1 triggers are exactly 10 s apart
-// (min = median = max = 1e10 ns) on both boards independently, i.e. a 0.1 Hz
-// clock.  They carry no light — mean charge 0.37 vs 11.14 ADC*sample on FADC1,
-// signal-window occupancy 0.004% vs 0.32%, trigger bit set on 0.2% of channels
-// vs 11.4% — and on FADC2, which self-triggers, no channel has the trigger bit
-// set at all.  They are 0.5% of the events.
-//
-// Only types 0 and 1 occur in the whole run: FADC1 1669186 / 8640, FADC2
-// 2531109 / 8639.  8640 = 24 h / 10 s exactly.  Neither tree carries trgType:
-// which tree an event went to says which it was.  kPedTrigType is in common.hh.
-
-// ── Charge ─────────────────────────────────────────────────────────────────
-// The charge is the sum of the found pulses, not the integral of the whole
-// window.  The Cherenkov signal is a sparse train of narrow pulses, so most of
-// a fixed window is empty and only contributes noise: measured on a
-// all 8640 pedestal-trigger events of run 263 -- which contain no light at all
-// -- the response is
-//
-//                      per channel          summed over the 47 tank channels
-//   fixed window   mean 0.39  RMS 31.73     mean 18.27  RMS 268.27
-//   sum of pulses  mean 0.30  RMS  3.66     mean 14.28  RMS  30.39
-//
-// 97.1% of channels give exactly zero.  At event level, where it matters for
-// the muon light yield, the noise floor drops from 268 to 30 ADC*sample --
-// 8.8x -- against a typical event charge of ~500.  The small residual bias
-// (14.3 per event, from the 2.9% of channels that catch a noise excursion) is
-// constant and can be subtracted.  The single-pulse template (aligned on its peak,
-// single-pulse channels only) is narrow — offsets -3..+5 already hold 86% of
-// the pulse, the rest is a low tail — so widening each excursion by kPulsePre
-// before and kPulsePost after recovers essentially all of it.  Charge retained
-// relative to the fixed window, by number of pulses found:
-//
-//   npul     1      2      3      4      5      6      7      8
-//   ratio  0.999  0.978  0.983  0.995  0.999  1.005  1.000  0.998
-//
-// i.e. within 2.2% across the whole dynamic range, so the gain in resolution
-// costs almost no linearity.  Below 4 sigma the threshold starts catching
-// noise (pedestal RMS 5.6 at 3 sigma, 9.5 at 2.5 sigma); above it, small
-// pulses are missed.  post=21 is where the ratio reaches 1 (0.92 at post=5,
-// 0.97 at 13, 1.02 at 33 where it starts picking up baseline).  `pre` barely
-// matters: the template holds only 1.3% of the charge before peak-3.
-//
-// The fixed-window integral is kept alongside as `qwin` for cross-checks.
-
 constexpr double kPulseSigma = 4.0; // pulse-finding threshold, in baseline RMS
 constexpr int kPulsePre = 3;        // samples added before each excursion
 constexpr int kPulsePost = 21;      // samples added after each excursion
+constexpr double kClipSigma = 4.0;  // baseline outlier rejection
 
-// ── PMT hit ────────────────────────────────────────────────────────────────
-// A hit is the DAQ trigger bit AND a charge above kHitCharge.  The trigger bit
-// is a clean height discriminator: P(tbit) is 0.004 below hmax 14 ADC, 0.66 at
-// 14-16, 0.99 at 16-18 and exactly 1.0000 above 18, identically on all 47 tank
-// channels, and no channel with hmax > 25 in the window ever has tbit = 0.
-// (The 3.7% of tbit = 1 channels with no pulse in the window are dark pulses
-// elsewhere in the 1008-sample record, which the discriminator also watches.)
-//
-// The charge cut sits above the noise peak at ~8 and the valley at ~19 in the
-// npul > 0 spectrum.  On top of tbit it removes only ~0.1% more, so it is
-// there to make the definition independent of the trigger bit rather than to
-// clean the sample.
-//
-// Note for gain work: tbit already truncates the low-charge side of the SPE
-// peak - its efficiency is 0.21 at charge 30-40, 0.64 at 40-50, 0.87 at 50-58 -
-// so the signal-window charge is not a gain reference.  Use `dark_q` below.
-
-// ── Dark pulses ────────────────────────────────────────────────────────────
-// `dark_q` is the gain reference: the pulse finder of the charge (`nsigma`,
-// `pre`, `post`) run over a region with no light, and the sum of the pulses it
-// finds there, 0 when there is none.  A dark pulse comes every ~140 us per
-// channel, so a region of a few hundred ns holds one at most, and dark_q is
-// that pulse's charge.  Its spectrum is the noise the threshold lets through
-// plus the single-photoelectron peak, whose mean is the gain (no offset).
-//
-// Normal triggers: the region is the baseline region [normLo, normHi).  The
-// front of the record is delayed ahead of the trigger and holds no light: on
-// run 263 the first discriminator crossings are flat at the dark level up to
-// sample 208 and rise only from there, the trigger forming at 297 (median of
-// the 5th crossing), and below the discriminator the dark rate in front of a
-// tbit = 1 channel is the same as in front of a tbit = 0 one (4.5 vs 4.9 kHz).
-// tbit is not a selection here: the discriminator watches the whole record, so
-// a dark pulse above it in the front sets tbit itself, and splitting on tbit
-// only moves those pulses from one side to the other.  Behind the signal sit
-// the AC-coupling undershoot and afterpulses, so only the front is used.
-//
-// Pedestal triggers: the pedestal baseline region, the whole record by default.
-//
-// On run 263 subruns 1-10 the fit (noise + 1 + 2 p.e.) gives a 1 p.e. mean of
-// 36.3 ADC*sample (median over the 47 tank PMTs, spread 4.3%) at a 7 kHz dark
-// rate.  Integrating a fixed window around the largest sample of the region
-// instead, with no threshold, agrees within 2.4% but stores a noise value for
-// every channel and record (+16% of output against ~0 for this).
-
-constexpr double kHitCharge = 25.0; // ADC x samples
-constexpr double kClipSigma = 4.0;  // pedestal outlier rejection
-
-// Splitting the output is off by default: `maxFileBytes <= 0` writes one file
-// however large it grows.  Passing a size rolls the output over the way ROOT's
-// own TTree::SetMaxTreeSize would, except that each file keeps its own copy of
-// the metadata below rather than only the last one.  This is a suggested value
-// to pass, not a default.
-
-constexpr Long64_t kSplitBytes = 1000000000LL; // 1 GB
+constexpr Long64_t kSplitBytes = 1000000000LL; // a sensible --split value, not a default
 constexpr int kMaxCh = 48;
 constexpr int kMaxWin = 8; // integration windows the pedestal tree can carry
 
 // ── Configuration ──────────────────────────────────────────────────────────
-// Everything above is a default.  What a run actually used comes from a YAML
-// file, because these numbers are still being studied and a production is only
-// reproducible if the settings travel with it rather than living in a rebuild.
+// Built-in defaults; the YAML overrides them and the values used go into the output.
 struct Config {
   double clipSigma = kClipSigma;
   int iters = 4;
@@ -243,15 +68,12 @@ struct Config {
   int pedAway = 80, secondAway = 20;
   int seed = 0;
 
-  // FADC1 writes 48 channels but only 1..47 carry a PMT; the 48th PMT is at
-  // the door and reads out on FADC2 as PID 49, on its own trigger path.
   int pidLo = 0, pidHi = 0; // 0,0 accepts whatever the board sends
 
   TString path = "(built-in defaults)";
 };
 
-// Read what the file gives and leave the rest alone, so a partial config is a
-// set of overrides rather than a trap.
+// Keys left out keep the default.  FADC1 keeps PID 1..47, FADC2 the door PMT 49.
 bool LoadConfig(const char * path, Config & c, int board)
 {
   if (board == 1) {
@@ -301,18 +123,8 @@ bool LoadConfig(const char * path, Config & c, int board)
 }
 
 // ── Baseline ───────────────────────────────────────────────────────────────
-// Every channel shows a fixed even/odd sample offset (up to +-1.3 ADC on the
-// door PMT, PID-dependent on the tank channels), so the baseline is estimated
-// separately for even and odd samples and subtracted per parity.  A few
-// iterations of one-sided clipping keep a stray dark pulse inside the region
-// from pulling the estimate up.
-//
-// [skipLo, skipHi) is left out, which is how the pedestal trigger can take its
-// baseline from the whole record apart from the pulse it just found.  A
-// pedestal-trigger record has no signal region, so using all of it rather than
-// only the front measurably tightens the charge: on run 263 the pedestal width
-// of a 13-sample window is 3.77 against 4.13, 9.5% better, because the level
-// wanders over the record faster than white noise would.
+// Even and odd samples separately (fixed parity offset), with one-sided
+// clipping of pulses; [skipLo, skipHi) is left out.
 struct Baseline {
   double even = 0.0;
   double odd = 0.0;
@@ -323,9 +135,7 @@ Baseline EstimateBaseline(const unsigned short * wave, int lo, int hi, double cl
                           int skipLo = 0, int skipHi = 0)
 {
   Baseline bl;
-  // The rejection is on the parity-subtracted deviation, not on the raw sample
-  // against the parity-averaged level: a channel whose two parities sit up to
-  // 3 ADC apart would otherwise have one of them cut far harder than the other.
+  // clip on the parity-subtracted deviation
   double selEven = 0.0, selOdd = 0.0, selCut = 1e9;
   long selN = -1;
 
@@ -387,10 +197,8 @@ inline double Sub(const unsigned short * wave, const Baseline & bl, int s)
 }
 
 // ── Pulse finding ──────────────────────────────────────────────────────────
-// Find the excursions above threshold in [lo, hi), widen each by (pre, post),
-// merge those that then overlap, and sum the baseline-subtracted samples they
-// cover.  Windows are clamped to [lo, hi), which loses nothing: the signal is
-// already back at the noise floor before hi.
+// Excursions above thr in [lo, hi), widened by (pre, post), merged, summed;
+// clamped to [lo, hi).
 struct Charge {
   double q = 0.0;
   int npulse = 0;
@@ -436,13 +244,7 @@ Charge SumPulses(const unsigned short * wave, const Baseline & bl, int lo, int h
 }
 
 // ── Producer ───────────────────────────────────────────────────────────────
-// One pass over the raw file feeds both trees: `normal` for the normal
-// triggers and `pedestal` for the 0.1 Hz pedestal ones.  They want different
-// things -- the normal-trigger charge comes from the pulses found inside a fixed
-// signal window, the pedestal charge from a set of windows around whatever the
-// largest excursion in the record happens to be -- but they read the same
-// waveform, so splitting them into two productions would read a terabyte
-// twice.
+// One pass over the raw files fills both trees.
 int produce(const std::vector<std::string> & inputs, const char * output, Long64_t maxEvents,
             Long64_t maxFileBytes, const char * cfgPath)
 {
@@ -541,13 +343,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
   printf("\n");
   if (cfg.pidHi > 0) printf("channels : PID %d..%d\n", cfg.pidLo, cfg.pidHi);
 
-  // The two trees share every quantity they both have, under the same name and
-  // the same type, so code that reads one reads the other.
-  //
-  //   per event    subrun evtNum trgNum trgTime nch      (+ nhit on normal)
-  //   per channel  pid base_even base_odd rms hmax hmaxx dark_q
-  //
-  // What is left is what only one of them measures.
+  // Shared quantities have the same name and type in both trees.
 
   // ── normal ──
   Int_t runNo = run, subrun = 0, nch = 0, nhit = 0;
@@ -753,8 +549,7 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
           continue;
         }
 
-        // the whole record is pedestal here, so take the level from all of it,
-        // then again with the pulse it found cut out
+        // level from the whole record, then again without the peak
         const int plo = cfg.pedLo;
         const int phi = cfg.pedHi > 0 ? std::min(cfg.pedHi, ndp) : ndp;
         Baseline bl = EstimateBaseline(wave, plo, phi, cfg.clipSigma, cfg.iters);

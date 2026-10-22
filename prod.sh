@@ -3,9 +3,9 @@
 #
 #   ./prod.sh <fadc|iadc> <run> <subrun> [boards]
 #
-#   ./prod.sh fadc 263 1            FADC1 and FADC2 subrun 1
-#   ./prod.sh fadc 263 1 2          FADC2 only
-#   ./prod.sh iadc 263 1            IADC subrun 1 (boards are ignored)
+#   ./prod.sh fadc <run> 1          FADC1 and FADC2 subrun 1
+#   ./prod.sh fadc <run> 1 2        FADC2 only
+#   ./prod.sh iadc <run> 1          IADC subrun 1 (boards are ignored)
 #
 # This is where the paths are decided; produce_fadc / produce_iadc only read
 # the raw file they are given and write the output file they are given.

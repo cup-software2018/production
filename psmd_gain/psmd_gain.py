@@ -3,7 +3,7 @@
     q = charge / (g[pid-1] * c[pid-1])
 
     import psmd_gain
-    t = psmd_gain.load("psmd_gain_263.txt")    # dict of arrays by PID-1: pid, g, c, use
+    t = psmd_gain.load("psmd_gain_<run>.txt")    # dict of arrays by PID-1: pid, g, c, use
     q = psmd_gain.calibrate(charge, pid, t)    # numpy; nan where use == 0
     d = psmd_gain.define(df, t)                # RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 """

@@ -28,7 +28,7 @@ channel.
 
 A whole run, on the cluster, one job per subrun:
 
-    ./submit.sh [run] [njobs] [from] [to]
+    ./submit.sh <run> [njobs] [from] [to]
 
     ./submit.sh <run> 8                      every subrun on disk, 8 at a time
     ./submit.sh <run> 8 0 600                subruns 0..600 only
@@ -121,7 +121,7 @@ kept in `old/`, and the compiled programs reproduce its output value for value.
 `$RDIR/out/prod_FADC<board>_<run:06d>.<subrun:05d>.root` and
 `$RDIR/out/prod_IADC_<run:06d>.<subrun:05d>.root`, with `RDIR` defaulting to
 `/data/cupsoft/WCMD/production` (the name predates the PSMD); `out/` here is a
-symlink to it, so `wcmd_io` finds the files there.  One file per subrun per
+symlink to it.  One file per subrun per
 stream.  They are **not merged** — a `TChain` over them costs nothing to build
 and there is then only one copy of the data to keep in step.  Per-subrun logs
 are in `out/log/` (`FADC<b>_<sub>.log`, `IADC_<sub>.log`), Slurm's own in
@@ -131,8 +131,8 @@ are in `out/log/` (`FADC<b>_<sub>.log`, `IADC_<sub>.log`), Slurm's own in
 
 ## Settings
 
-Everything that shapes a number lives in the yaml files, with the reason for
-each value written beside it.  Nothing is compiled in except the defaults, and
+Everything that shapes a number lives in the yaml files, each key with a
+one-line comment.  Nothing is compiled in except the defaults, and
 whatever was actually used is copied into every output file (see *Provenance*),
 so a file says how it was made.  A key left out of the yaml keeps its default,
 so a config can be a short list of overrides.
@@ -141,18 +141,31 @@ so a config can be a short list of overrides.
 
 ## FADC — WCMD
 
+### The readout
+
+* NKFADC500: 2 ns per sample, 1008 samples (2.016 µs) per record, every
+  channel in every event.  Charges are ADC × samples, baseline subtracted.
+* Every channel has a fixed even/odd sample offset, so the baseline is taken
+  per parity.
+* FADC1 carries the tank PMTs (PID 1–47; 48 is unconnected), FADC2 the door
+  PMT (PID 49) on its own trigger path.  `channels` keeps a PID range per
+  board, so each board is produced separately.
+* Trigger times are ns since the start of the run, counted by each board, so
+  FADC1 and FADC2 differ by a fixed offset for the same event.
+
 ### Algorithm
 
-One pass over the raw file.  Each event goes to one of the two trees by its
-trigger type, and every channel in the `channels` PID range is processed as
+One pass over the raw files (several are read as one chain; `--split` rolls
+the output over past the given size).  Each event goes to one of the two trees
+by its trigger type, and every channel in the `channels` range is processed as
 below (a record too short for the windows is skipped and counted).
 
 **Normal trigger** — per channel:
 
-1. **Baseline.**  Over `window_normal`, take the mean of the even samples and
-   of the odd samples separately, and the rms around them.  Drop the samples
-   more than `clip_sigma` × rms *above* their level (a pulse only goes up) and
-   recompute; repeat up to `iters` times or until nothing changes.
+1. **Baseline.**  Over `window_normal`, in front of the signal, take the mean
+   of the even and of the odd samples and the rms around them.  Drop the
+   samples more than `clip_sigma` × rms *above* their level (a pulse only goes
+   up) and recompute; repeat up to `iters` times or until nothing changes.
    → `base_even`, `base_odd`, `rms`
 2. **Subtract** the even level from even samples and the odd level from odd
    samples.  Everything below uses this baseline-subtracted waveform.
@@ -163,12 +176,14 @@ below (a record too short for the windows is skipped and counted).
    2. widen each pulse by `pre` samples before and `post` after;
    3. merge the widened pulses that touch or overlap;
    4. sum the samples they cover → `charge`.
-   No pulse found means `charge` = 0 exactly.
+   No pulse found means `charge` = 0 exactly.  The signal is a sparse train of
+   narrow pulses, so summing only the pulses drops the noise of the empty
+   samples that `qwin` keeps.
 5. Copy the DAQ trigger bit → `tbit`; count the channels with it set → `nhit`.
-6. **Dark.**  Run the pulse finder of step 4 over the baseline region
-   (`window_normal`) and sum what it finds → `dark_q`, 0 if nothing.  The front
-   of the record is delayed ahead of the trigger and holds no light, so these
-   are dark pulses of every channel, whatever its `tbit`: the gain reference.
+6. **Dark.**  Run the pulse finder of step 4 over `window_normal` and sum what
+   it finds → `dark_q`, 0 if nothing.  The front of the record is delayed
+   ahead of the trigger and holds no light, so these are dark pulses of every
+   channel, whatever its `tbit`.
 
 **Pedestal trigger** — per channel (no light, so the whole record is used):
 
@@ -185,64 +200,27 @@ below (a record too short for the windows is skipped and counted).
 6. **Window charges.**  For each `(head, tail)` in `windows`, sum
    `[peak − head, peak + tail]` → `q_<head>_<tail>`, and the same window at the
    pulse-free position → `qp_<head>_<tail>`, the noise reference.
-7. **Dark.**  The same pulse finder over `window_pedestal` → `dark_q`, so both
-   trees carry it under one definition.
-
-Several input files are read as one chain; with `--split` the output rolls
-over to a new file past the given size.
+7. **Dark.**  The same pulse finder over `window_pedestal` → `dark_q`.
 
 ### Settings (`prod_fadc.yaml`)
 
 | key | |
 |---|---|
-| `baseline.window_normal` | baseline region of physics triggers, in front of the signal |
+| `baseline.window_normal` | baseline region of normal triggers, in front of the signal; also the `dark_q` region |
 | `baseline.window_pedestal` | baseline region of pedestal triggers; `[0, 0]` for the whole record |
 | `baseline.exclude_pedestal` | cut out of it around the peak, relative to the peak |
 | `baseline.clip_sigma` / `iters` | one-sided rejection of pulses inside the region |
 | `normal.integration` | the signal window |
-| `normal.pulse` | `nsigma`, `pre`, `post`: pulse finding inside that window |
+| `normal.pulse` | `nsigma`, `pre`, `post`: pulse finding |
 | `pedestal.windows` | `(head, tail)` charge windows around the peak, at most 8 |
 | `pedestal.hmax_range` | where the peak may sit |
 | `pedestal.ped_away` / `second_away` | how far `qp_*` and `hmax2` stay from it |
 | `pedestal.seed` | random seed for the pulse-free position |
 | `channels` | PID range kept per board |
 
-#### Baselines
+### Output
 
-Both are parity-split: every channel carries a fixed even/odd sample offset,
-and the two parities are measured and subtracted separately.  The clipping is
-one-sided — a pulse only pushes samples up — and it is applied to the
-parity-subtracted deviation, not to the raw sample against the averaged level,
-which would bite far harder into one parity than the other.
-
-The two triggers get different regions because they must.  A physics trigger
-has light in the record, so only the part in front of the signal is usable; a
-pedestal trigger has none, so the whole record is, apart from the pulse it just
-found.  Past the signal the AC-coupling undershoot sits below the true level,
-so a physics trigger cannot use the back of its record.
-
-#### Why a pulse sum
-
-The signal is a sparse train of narrow pulses, so most of a fixed window holds
-only noise.  Summing only the pulses found keeps the signal and drops that
-noise: a channel that saw nothing has `charge` exactly 0, while the plain
-window integral `qwin`, kept beside it, wanders with the noise.
-
-#### Channels
-
-`channels` keeps a PID range per board, so an unconnected channel is dropped
-here rather than written out and filtered later.  The door PMT reads out on
-FADC2 on **its own trigger path**, so that board is produced separately and its
-numbers are not mixed with the tank's.
-
-### Output format
-
-Each tree carries its own branches in full; nothing is stored once and shared
-between them.  What they do share is naming: a quantity that means the same
-thing in both is written under the same branch name with the same type, so a
-reader that knows one tree can read the other.  `pedestal` is `normal` without
-`run`, `nhit` and the branches that need a trigger, plus the branches that only
-a signal-free record can give.
+A quantity both trees have is written under the same name and type.
 
 #### Tree `normal` — one entry per normal trigger
 
@@ -256,110 +234,49 @@ Per event:
 | `evtNum` | `UInt_t` | | event number from the DAQ |
 | `trgNum` | `UInt_t` | | trigger number from the DAQ |
 | `trgTime` | `ULong64_t` | ns | since the start of the run |
-| `nhit` | `Int_t` | | how many channels have `tbit` set |
+| `nhit` | `Int_t` | | channels with `tbit` set |
 
-Per channel, all of length `nch` and indexed the same way as `pid`:
+Per channel, all `[nch]`, indexed like `pid`:
 
 | branch | type | unit | meaning |
 |---|---|---|---|
 | `pid` | `Short_t` | | channel id as the DAQ writes it |
-| `base_even` | `Float_t` | ADC | baseline of the even samples |
-| `base_odd` | `Float_t` | ADC | baseline of the odd samples |
+| `tbit` | `UShort_t` | | DAQ per-channel discriminator, 0 or 1 |
+| `base_even`, `base_odd` | `Float_t` | ADC | baseline of the even / odd samples |
 | `rms` | `Float_t` | ADC | its rms after parity subtraction |
-| `hmax` | `Float_t` | ADC | largest sample over baseline, **inside the integration window** |
-| `hmaxx` | `Short_t` | sample | where that sample is |
-| `tbit` | `UShort_t` | | the DAQ's own per-channel discriminator, 0 or 1 |
-| `charge` | `Float_t` | ADC×sample | **sum over the pulses found** in the integration window |
-| `qwin` | `Float_t` | ADC×sample | plain integral of the whole window |
-| `npul` | `Short_t` | | pulses the finder separated inside the window |
-| `dark_q` | `Float_t` | ADC×sample | sum of the pulses found in the baseline region, 0 if none: the dark (gain) sample |
-
-`nhit` is nothing but the count of channels the DAQ itself called hit, so it
-can be compared with the trigger's own multiplicity requirement without
-depending on anything this production decided.  Any offline hit definition —
-a charge cut, a gain-corrected charge cut — belongs in the analysis, where it
-can be changed without reproducing a run.
-
-There is no `qtot`.  A total charge is a sum over a per-channel calibration,
-and a sum of raw ADC over channels of different gain is not a quantity worth
-storing.
+| `hmax`, `hmaxx` | `Float_t`, `Short_t` | ADC, sample | largest sample over baseline inside the integration window, and where |
+| `charge` | `Float_t` | ADC·sample | **sum over the pulses found** in the integration window |
+| `qwin` | `Float_t` | ADC·sample | plain integral of the window |
+| `npul` | `Short_t` | | pulses found in the window |
+| `dark_q` | `Float_t` | ADC·sample | sum of the pulses found in `window_normal`, 0 if none |
 
 #### Tree `pedestal` — one entry per pedestal trigger
 
-Per event:
+Per event: as `normal`, without `run` (it is in the provenance) and `nhit`.
 
-| branch | type | unit | meaning |
-|---|---|---|---|
-| `nch` | `Int_t` | | channels in this entry; the length of every array below |
-| `subrun` | `Int_t` | | which subrun this event came from |
-| `evtNum` | `UInt_t` | | event number from the DAQ |
-| `trgNum` | `UInt_t` | | trigger number from the DAQ |
-| `trgTime` | `ULong64_t` | ns | since the start of the run |
-
-No `run`: the number is in the file's own `TNamed` provenance below, and in the
-`normal` tree of the same file.  No `nhit`: there is no trigger bit to count.
-
-Per channel, all of length `nch` and indexed the same way as `pid`:
+Per channel, all `[nch]`, indexed like `pid`:
 
 | branch | type | unit | meaning |
 |---|---|---|---|
 | `pid` | `Short_t` | | channel id as the DAQ writes it |
-| `base_even` | `Float_t` | ADC | baseline of the even samples |
-| `base_odd` | `Float_t` | ADC | baseline of the odd samples |
+| `base_even`, `base_odd` | `Float_t` | ADC | baseline of the even / odd samples |
 | `rms` | `Float_t` | ADC | its rms after parity subtraction |
-| `hmax` | `Float_t` | ADC | largest excursion over baseline, **anywhere in `hmax_range`** |
-| `hmaxx` | `Short_t` | sample | where it is |
-| `hmax2` | `Float_t` | ADC | next largest, at least `second_away` from the peak |
-| `gap2` | `Short_t` | sample | signed distance to it |
-| `q_<head>_<tail>` | `Float_t` | ADC×sample | charge over `[peak-head, peak+tail]`, one per window |
-| `qp_<head>_<tail>` | `Float_t` | ADC×sample | the same integrator at a pulse-free position |
+| `hmax`, `hmaxx` | `Float_t`, `Short_t` | ADC, sample | largest excursion over baseline **anywhere in `hmax_range`**, and where |
+| `hmax2`, `gap2` | `Float_t`, `Short_t` | ADC, sample | next largest, at least `second_away` from the peak, and its signed distance |
+| `q_<head>_<tail>` | `Float_t` | ADC·sample | charge over `[peak − head, peak + tail]`, one per window |
+| `qp_<head>_<tail>` | `Float_t` | ADC·sample | the same at a pulse-free position |
 | `qp_pos` | `Short_t` | sample | where that position was |
-| `dark_q` | `Float_t` | ADC×sample | sum of the pulses found in `window_pedestal`, as in the normal tree |
-
-`hmax` and `hmaxx` are the one pair whose shared name hides a difference: here
-the peak is searched over the whole of `hmax_range`, because a pedestal record
-has no signal window to look in, while in `normal` it is searched inside the
-integration window.
-
-The live time behind anything measured from this tree is the width of
-`hmax_range` per entry per channel, not the record.
+| `dark_q` | `Float_t` | ADC·sample | sum of the pulses found in `window_pedestal`, 0 if none |
 
 #### Provenance
 
-Every file carries the settings it was made with as `TNamed` objects at the top
-level, readable without the trees:
+The settings used, as `TNamed` objects at the top level of every file:
 
     run  board  subrun  input  config
     window_normal  window_pedestal  exclude_pedestal  clip_sigma  iters
-    integration  pulse
+    integration  pulse  dark
     hmax_range  ped_away  second_away  seed
     channels  maxFileBytes
-
-#### Units and conventions
-
-A sample is 2 ns (NKFADC500 at 500 MS/s).  Charges are ADC × samples with the
-baseline subtracted.  Trigger times are ns since the start of the run, counted
-separately by each board, so FADC1 and FADC2 differ by a fixed offset for the
-same physical event.
-
-### Reading it
-
-`../WCMD/wcmd_io.py` chains the per-subrun files and flattens the per-channel
-arrays into numpy columns:
-
-    import wcmd_io
-    d = wcmd_io.load(["pid", "hmax", "q_4_8", "qp_4_8"], tree="pedestal", run=<run>)
-    d["hmax"]          # one element per (record, channel)
-    d["rec"]           # which record each element came from
-
-The flattening runs inside ROOT through `TTree::Draw`, not an entry loop in
-python; for millions of channels that is the difference between seconds and an
-afternoon.  Ask for `pmt` instead of `pid` to get the door PMT numbered next to
-the tank's, so the two boards can sit side by side.
-
-The `normal` tree of a whole run is usually too large for that, so read it one
-subrun file at a time and histogram as you go; `../WCMD/charge_dist.py` is a
-worked example.
 
 ---
 
@@ -367,136 +284,140 @@ worked example.
 
 ### The readout
 
-* The IADC goes through the same DAQ writer as the FADC, so a file holds
-  `FChannelData` waveforms: 12-bit, positive pulses, NDP = 8·RL − 2 samples per
-  channel.  **16 ns per sample** is inferred from the register layout (one RL
-  unit is 128 ns on every Notice board), not from a datasheet.  The record
-  length is read from each channel, not compiled in.
-* Zero suppression is on: a physics event holds only the channels over
-  threshold, so the `normal` tree carries those and the `pedestal` tree carries
-  every channel.
-* **Module m = (pid − 1) / 4.**  The trigger is a coincidence over these
-  groups.  Inside a module, `k = (pid − 1) % 4`: k 0,1 read one scintillator
-  layer, k 2,3 the other; k 0 and 2 are at the same end, k 1 and 3 at the
-  other.
+* NKIADC64: 16 ns per sample (inferred from the register layout: one RL unit
+  is 128 ns on every Notice board), NDP = 8·RL − 2 samples per record,
+  12-bit.  The record length is read from each channel.  Charges are
+  ADC × samples over `ped + qbase`.
+* No even/odd offset, so one baseline `base` where the FADC has two.
+* Zero suppression: a normal trigger holds only the channels over threshold; a
+  pedestal trigger holds all 520.
+* Module m = (pid − 1) / 4.
+* Trigger times are ns since the start of the run.
 
 ### Algorithm
 
 One pass over the raw file.  Each event goes to one of the two trees by its
-trigger type; every channel in it is processed the same way, apart from the
-baseline region in step 3 and the fit in step 5 (a record too short for the
-windows is skipped and counted).
+trigger type, and every channel in it is processed as below (a record too
+short for the windows is skipped and counted).
 
-Per channel:
+**Per channel**, both triggers:
 
 1. **Header pedestal.**  Take the pedestal the ADC writes in the channel
    header → `ped`, and subtract it from every sample.
-2. **Level under the charge** (`normal.baseline: fit`, the default).  Fit
-   with the dark-pulse fit below — `window_normal` on normal triggers, the
-   whole record on pedestal triggers, which have no light; its flat level is
-   the true baseline, which the dark pulses had lifted the header pedestal
-   above → `qbase` (0 if the fit fails, or with `normal.baseline: header`).
+2. **Level under the charge** (`normal.baseline: fit`, the default).  Run the
+   dark-pulse fit below over `window_normal` on normal triggers, over the
+   whole record on pedestal triggers; its flat level → `qbase` (0 if the fit
+   fails, or with `normal.baseline: header`).
 3. **Baseline region.**  Mean and rms of the raw samples over `window_normal`
-   on normal triggers, over `window_pedestal` (the whole record by default) on
-   pedestal triggers → `base`, `rms`.  From here on every sample is taken
-   against `ped + qbase`:
-   * sum over `window_normal` → `qpre` (the tail of an earlier pulse shows up
-     here);
+   on normal triggers, over `window_pedestal` on pedestal triggers → `base`,
+   `rms`.  From here on every sample is taken against `ped + qbase`:
+   * sum over `window_normal` → `qpre` (the tail of an earlier pulse);
    * sum over `integration` → `charge`; the largest sample and where →
      `hmax`, `hmaxx`;
-   * the first point on the rising edge where the waveform crosses `cf` ×
-     `hmax`, interpolated between samples → `tlead` (−1 if none);
-   * the same crossing found walking down from the peak, so an earlier, smaller
-     pulse cannot take it, and allowed in front of the integration window,
-     interpolated → `tcf`, in ns (−1 if none, and on a saturated waveform);  The arrival time: on run 263
-     (112k modules) (t0 + t1)/2 − (t2 + t3)/2 has a 2.9 ns robust sigma, 1.7 ns
-     above 1100 ADC, better than a template or a Gaussian rising-edge fit;
-   * the samples of the record at the 12-bit ceiling (4095) → `nsat`; on a
-     saturated waveform `hmax` is the ceiling, not the height, so `tcf` is not
-     computed there (it would come out up to ~20 ns early).  Saturation is a
-     muon matter: on run 263 no module below 150 p.e. has it, nearly every one
-     above 400 p.e. does.
+   * the first rising-edge crossing of `cf` × `hmax`, interpolated → `tlead`
+     (−1 if none);
+   * the same crossing found walking down from the peak, so an earlier,
+     smaller pulse cannot take it, allowed in front of the integration window,
+     interpolated → `tcf` in ns (−1 if none or saturated);
+   * samples of the record at the 12-bit ceiling (4095) → `nsat`; there `hmax`
+     is the ceiling, so no `tcf`.
 4. Copy the DAQ trigger bit → `tbit`; count the channels with it set → `nhit`,
    and the modules they belong to → `nmod`.
-5. **Dark pulses** → `fit_*`, `npul`, `pul_*`, from the same fit as step 2
-   (on pedestal triggers only if `pedestal.fit.enabled`).
+5. **Dark pulses** from the fit of step 2 → `fit_*`, `npul`, `pul_*` (on
+   pedestal triggers only if `pedestal.fit.enabled`).
 
-**The dark-pulse fit** — a flat level plus a few pulses of one common shape:
+**Dark-pulse fit** — a flat level plus n Moyal pulses of one common width
+(`DarkFit`, the same algorithm as `../view_waveform_iadc.py`):
 
-1. **Level.**  Start from the lower 20% of the samples and average those
+1. **Level.**  Start from the lower 20 % of the samples and average those
    within 2.5 `sigma_e` of it, a few times; dark pulses only push samples up.
-2. **Seeds.**  Every local maximum at least `seed_height` above that level,
-   at least 3 samples from a higher one and standing out by 0.8 ×
-   `seed_height`, is a pulse to start from; so is a falling edge at the start
-   of the record or a rising edge at its end (a pulse just outside it).
-3. **Fit** the level, one common width (kept inside `sigma_range`) and a
-   height and position per pulse, by Levenberg-Marquardt.
+2. **Seeds.**  Every local maximum at least `seed_height` above that level, at
+   least 3 samples from a higher one and standing out by 0.8 × `seed_height`;
+   also a falling edge at the start of the record or a rising edge at its end
+   (a pulse just outside it).
+3. **Fit** the level, the common width (inside `sigma_range`) and a height and
+   position per pulse, by Levenberg-Marquardt.
 4. **Add pulses.**  Where the waveform is furthest above the fit, if by more
-   than `add_residual`, add a pulse there and refit; keep it only if chi2
-   drops by at least `add_dchi2`.  Repeat up to `max_pulses`.
-5. **Keep** the pulses higher than `keep_height`; each one's area is
-   4.1327 × height × width.
+   than `add_residual`, add a pulse and refit; keep it only if chi2 drops by
+   at least `add_dchi2`.  Repeat up to `max_pulses`.
+5. **Keep** the pulses higher than `keep_height`; area = 4.1327 × height ×
+   width.
 
 ### Settings (`prod_iadc.yaml`)
 
 | key | |
 |---|---|
-| `baseline.window_normal` | region in front of the signal on physics triggers |
+| `baseline.window_normal` | baseline region of normal triggers, in front of the signal |
 | `baseline.window_pedestal` | baseline region of pedestal triggers; `[0, 0]` for the whole record |
 | `normal.integration` | the signal window |
 | `normal.cf` | constant fraction for `tlead` and `tcf` |
 | `normal.baseline` | `fit` (dark-pulse fit level, the default) or `header` (header pedestal alone) |
 | `pedestal.fit.*` | the dark-pulse fit: `enabled`, `sigma_e`, `seed_height`, `add_residual`, `add_dchi2`, `max_pulses` (≤ 12), `sigma_range`, `mu_min`, `keep_height` |
 
-### Branches
+### Output
 
-Per event: `nch subrun evtNum trgNum trgTime(ns)`, plus `run nhit nmod` on
-`normal` (`nhit` = channels with `tbit`, as in the WCMD; `nmod` = modules
-among the channels).  Per channel (`[nch]`, indexed like `pid`), the same in
-both trees:
+A quantity both trees have is written under the same name and type, and the
+names follow the FADC.
 
-| branch | unit | meaning |
-|---|---|---|
-| `pid` | | channel id as the DAQ writes it |
-| `tbit` | | DAQ trigger bit |
-| `ped` | ADC | header pedestal |
-| `base`, `rms` | ADC | mean and rms of the baseline region: `window_normal` on `normal`, `window_pedestal` on `pedestal` |
-| `qbase` | ADC over ped | the level charge, hmax, tlead and qpre are taken against |
-| `qpre` | ADC·sample | Σ (w − ped − qbase) over `window_normal`: pile-up from an earlier pulse |
-| `hmax`, `hmaxx` | ADC, sample | largest sample over ped + qbase inside the integration window and where |
-| `tlead` | sample | constant-fraction crossing on the rising edge, −1 if none |
-| `tcf` | ns | arrival time: the same crossing found from the peak down, anywhere in the record; −1 if none or if saturated |
-| `nsat` | | samples of the record at the ADC ceiling (4095); > 0 = saturated |
-| `charge` | ADC·sample | as above |
+#### Tree `normal` — one entry per normal trigger
 
-There is no even/odd split: the IADC shows none, so `base` stands where the
-WCMD has `base_even` / `base_odd`.
+Per event:
 
-#### Dark-pulse fit
+| branch | type | unit | meaning |
+|---|---|---|---|
+| `run` | `Int_t` | | run number |
+| `nch` | `Int_t` | | channels in this entry; the length of every array below |
+| `subrun` | `Int_t` | | which subrun this event came from |
+| `evtNum` | `UInt_t` | | event number from the DAQ |
+| `trgNum` | `UInt_t` | | trigger number from the DAQ |
+| `trgTime` | `ULong64_t` | ns | since the start of the run |
+| `nhit` | `Int_t` | | channels with `tbit` set |
+| `nmod` | `Int_t` | | modules among the channels |
+| `npulse` | `Int_t` | | dark pulses in the event, the length of the `pul_*` arrays |
 
-On the pedestal tree every channel is fitted over the whole record; on the
-normal tree over `window_normal`; on both it is the fit that gives `qbase`.  The model is a
-flat level plus n Moyal pulses of a common width (`DarkFit` in
-`produce_iadc.cc`, settings under `pedestal.fit`, the same algorithm as the
-python one in `../view_waveform_iadc.py`; steps in *Algorithm* above).  The point is
-the gain: each dark pulse gives its own area, so the random triggers of a
-single subrun already hold enough pulses per channel for a gain.  The same
-branches on the normal tree hold the dark pulses found in front of the signal.
+Per channel, all `[nch]`, indexed like `pid`:
 
-| branch | unit | meaning |
-|---|---|---|
-| `fit_base[nch]` | ADC over ped | fitted flat level (the pulse-free baseline) |
-| `fit_sigma[nch]` | sample | common Moyal width, bounded to `sigma_range` |
-| `fit_chi2[nch]` | | chi2/ndf with white noise `sigma_e` (the noise is correlated, so below 1 is normal) |
-| `npul[nch]` | | pulses kept on the channel, −1 if the fit failed |
-| `npulse` | | pulses in the event, length of the `pul_*` arrays |
-| `pul_ch[npulse]` | | index into the `[nch]` arrays |
-| `pul_t[npulse]` | sample | Moyal peak position (may lie outside the record for edge pulses) |
-| `pul_h[npulse]` | ADC | peak height |
-| `pul_area[npulse]` | ADC·sample | 4.1327 · h · sigma, the whole Moyal area |
+| branch | type | unit | meaning |
+|---|---|---|---|
+| `pid` | `Short_t` | | channel id as the DAQ writes it |
+| `tbit` | `UShort_t` | | DAQ per-channel discriminator, 0 or 1 |
+| `ped` | `UShort_t` | ADC | header pedestal |
+| `qbase` | `Float_t` | ADC over ped | the level everything below is taken against |
+| `base`, `rms` | `Float_t` | ADC | mean and rms of `window_normal` |
+| `qpre` | `Float_t` | ADC·sample | sum over `window_normal` |
+| `hmax`, `hmaxx` | `Float_t`, `Short_t` | ADC, sample | largest sample inside the integration window, and where |
+| `tlead` | `Float_t` | sample | cf crossing on the rising edge, −1 if none |
+| `tcf` | `Float_t` | ns | cf crossing walking down from the peak, −1 if none or saturated |
+| `nsat` | `Short_t` | | samples at the ADC ceiling; > 0 = saturated |
+| `charge` | `Float_t` | ADC·sample | integral of the integration window |
+| `fit_base` | `Float_t` | ADC over ped | fitted flat level |
+| `fit_sigma` | `Float_t` | sample | common Moyal width |
+| `fit_chi2` | `Float_t` | | chi2/ndf with white noise `sigma_e` (the noise is correlated, so below 1 is normal) |
+| `npul` | `Short_t` | | dark pulses kept, −1 if the fit failed |
+
+Per dark pulse, all `[npulse]`:
+
+| branch | type | unit | meaning |
+|---|---|---|---|
+| `pul_ch` | `Short_t` | | index into the `[nch]` arrays |
+| `pul_t` | `Float_t` | sample | Moyal peak position (may lie outside the record) |
+| `pul_h` | `Float_t` | ADC | peak height |
+| `pul_area` | `Float_t` | ADC·sample | 4.1327 · h · sigma |
+
+`fit_*`, `npul`, `npulse` and `pul_*` are written only when the fit runs
+(`normal.baseline: fit` on `normal`, `pedestal.fit.enabled` on `pedestal`).
+
+#### Tree `pedestal` — one entry per pedestal trigger
+
+Per event: as `normal`, without `run` (it is in the provenance), `nhit` and
+`nmod`.  Per channel and per dark pulse: the same branches as `normal`, with
+`base`, `rms` over `window_pedestal` and the dark-pulse fit over the whole
+record.
 
 #### Provenance
 
+The settings used, as `TNamed` objects at the top level of every file:
+
     run  subrun  input  config
     window_normal  window_pedestal  integration  cf  baseline  sample_ns
-    pedestal_fit
+    adc_ceiling  pedestal_fit

@@ -17,7 +17,7 @@
 constexpr unsigned short kPedTrigType = 1;
 
 // The DAQ names its files <stream>_<run:06d>.root.<subrun:05d>, e.g.
-// FADC1_000263.root.00001 or IADC_000263.root.00001; the run and subrun the
+// FADC1_000123.root.00001 or IADC_000123.root.00001; the run and subrun the
 // output carries are read from there.
 inline bool ParseRawName(const char * path, TString & stream, int & run, int & sub)
 {

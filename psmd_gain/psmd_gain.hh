@@ -4,7 +4,7 @@
 //     q = charge / (g[pid-1] * c[pid-1])
 //
 //   #include "psmd_gain.hh"
-//   psmd_gain::Table t = psmd_gain::Load("psmd_gain_263.txt");   // by PID-1: g, c, use
+//   psmd_gain::Table t = psmd_gain::Load("psmd_gain_<run>.txt");   // by PID-1: g, c, use
 //   double q = t.Calibrate(charge, pid);                         // NaN where use == 0
 //   auto d = psmd_gain::Define(df, t);                           // RDataFrame: q[nch] next to charge[nch], 0 where use == 0
 //   ROOT::RDataFrame df("normal", psmd_gain::ProdFiles(prod, run));

@@ -3,16 +3,19 @@ matching per channel on data c was not taken from (c from the even subruns, appl
 
     python check_muon_cal.py <run> [--dir DIR]     -> check_muon_cal_<run>.png, check_odd_match_<run>.png
 """
+import matplotlib.pyplot as plt
 import argparse
 import os
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--dir", default=".", help="where the inputs are and the plots go")
+p.add_argument("--dir", default=".",
+               help="where the inputs are and the plots go")
 a = p.parse_args()
 RUN = a.run
 BLUE, ORANGE = "#2a78d6", "#eb6834"
@@ -30,7 +33,8 @@ pid = np.arange(1, 521)
 E = z["edges"]
 
 fig, ax = plt.subplots(figsize=(11, 4.6))
-ax.plot(pid[ok], c[ok], "o", ms=3, color=BLUE, label=f"own factor ({ok.sum()})")
+ax.plot(pid[ok], c[ok], "o", ms=3, color=BLUE,
+        label=f"own factor ({ok.sum()})")
 fb = np.isfinite(c) & ~ok
 ax.plot(pid[fb], c[fb], "o", ms=4, mfc="none", color=ORANGE,
         label=f"too few muons: detector mean or 1 ({fb.sum()})")
@@ -40,9 +44,11 @@ for lo, hi in [(205, 260), (465, 520)]:
 ax.set_xlim(0, 521)
 ax.set_xlabel("PID")
 ax.set_ylabel("c = channel median / median of channel medians")
-ax.set_title(f"light-collection factor per channel, rms {np.nanstd(c[ok]):.1%}")
+ax.set_title(
+    f"light-collection factor per channel, rms {np.nanstd(c[ok]):.1%}")
 ax.legend(loc="upper right")
-fig.suptitle(f"PSMD per-channel muon response — run {RUN}", x=0.01, ha="left", color=INK)
+fig.suptitle(
+    f"PSMD per-channel muon response — run {RUN}", x=0.01, ha="left", color=INK)
 fig.tight_layout()
 fig.savefig(os.path.join(a.dir, f"check_muon_cal_{RUN}.png"), dpi=130)
 
@@ -85,7 +91,8 @@ ax.set_xlabel("PID")
 ax.set_ylabel("channel median / median of channel medians")
 ax.set_title(f"odd subruns, c from the even subruns: {chk.sum()} channels")
 ax.legend(loc="upper right")
-fig.suptitle(f"PSMD gain matching per channel on independent data — run {RUN}", x=0.01, ha="left", color=INK)
+fig.suptitle(
+    f"PSMD gain matching per channel on independent data — run {RUN}", x=0.01, ha="left", color=INK)
 fig.tight_layout()
 fig.savefig(os.path.join(a.dir, f"check_odd_match_{RUN}.png"), dpi=130)
 print(f"odd subruns, {chk.sum()} channels: rms g only {np.std(r0[chk]):.2%}, g and c {np.std(r1[chk]):.2%}; "

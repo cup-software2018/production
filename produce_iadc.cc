@@ -35,7 +35,7 @@ constexpr int kMaxCh = 520;
 // Built-in defaults; prod_iadc.yaml overrides them.
 constexpr int kBaseLoDef = 0, kBaseHiDef = 14; // baseline region, normal triggers
 constexpr int kIntLoDef = 16, kIntHiDef = 48;
-constexpr double kCF = 0.5; // constant fraction for the leading-edge time
+constexpr double kCF = 0.5;        // constant fraction for the leading-edge time
 constexpr double kSampleNs = 16.0; // IADC sample period
 constexpr int kAdcCeiling = 4095;  // 12-bit ADC: samples here are clipped
 
@@ -538,17 +538,18 @@ int produce(const char * in, const char * out, const char * cfgPath)
       t->Branch("nhit", &nhit, "nhit/I"); // channels with the trigger bit set
       t->Branch("nmod", &nmod, "nmod/I"); // modules among the channels, (pid-1)/4
     }
-    t->Branch("pid", pid, "pid[nch]/S");          // channel id, as the DAQ writes it
-    t->Branch("tbit", tbit, "tbit[nch]/s");       // DAQ per-channel discriminator
-    t->Branch("ped", ped, "ped[nch]/s");          // ADC, pedestal from the ADC header
-    t->Branch("base", base, "base[nch]/F");       // ADC, mean of the baseline region
-    t->Branch("rms", rms, "rms[nch]/F");          // ADC, its rms
-    t->Branch("qpre", qpre, "qpre[nch]/F");       // ADC x sample, window_normal over ped
-    t->Branch("hmax", hmax, "hmax[nch]/F");       // ADC over ped, in the integration window
-    t->Branch("hmaxx", hmaxx, "hmaxx[nch]/S");    // where it is
-    t->Branch("tlead", tlead, "tlead[nch]/F");    // sample, cf crossing; -1 if none
-    t->Branch("tcf", tcf, "tcf[nch]/F");          // ns, cf crossing walking down from the peak; -1 if none or saturated
-    t->Branch("nsat", nsat, "nsat[nch]/S");       // samples at the ADC ceiling (4095); > 0 = saturated
+    t->Branch("pid", pid, "pid[nch]/S");       // channel id, as the DAQ writes it
+    t->Branch("tbit", tbit, "tbit[nch]/s");    // DAQ per-channel discriminator
+    t->Branch("ped", ped, "ped[nch]/s");       // ADC, pedestal from the ADC header
+    t->Branch("base", base, "base[nch]/F");    // ADC, mean of the baseline region
+    t->Branch("rms", rms, "rms[nch]/F");       // ADC, its rms
+    t->Branch("qpre", qpre, "qpre[nch]/F");    // ADC x sample, window_normal over ped
+    t->Branch("hmax", hmax, "hmax[nch]/F");    // ADC over ped, in the integration window
+    t->Branch("hmaxx", hmaxx, "hmaxx[nch]/S"); // where it is
+    t->Branch("tlead", tlead, "tlead[nch]/F"); // sample, cf crossing; -1 if none
+    t->Branch("tcf", tcf,
+              "tcf[nch]/F"); // ns, cf crossing walking down from the peak; -1 if none or saturated
+    t->Branch("nsat", nsat, "nsat[nch]/S"); // samples at the ADC ceiling (4095); > 0 = saturated
     t->Branch("charge", charge, "charge[nch]/F"); // ADC x sample, integration window over qbase
     t->Branch("qbase", qbase, "qbase[nch]/F");    // ADC over ped, the level of the line above
     if (isPed ? cfg.fit : cfg.normFit) {

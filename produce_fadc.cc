@@ -398,7 +398,8 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
     tnorm->Branch("charge", charge, "charge[nch]/F"); // ADC x samples, sum of found pulses
     tnorm->Branch("qwin", qwin, "qwin[nch]/F");       // ADC x samples, plain window integral
     tnorm->Branch("npul", npul, "npul[nch]/S");       // pulses found in the window
-    tnorm->Branch("dark_q", dark_q, "dark_q[nch]/F"); // ADC x samples, sum of pulses in the baseline region
+    tnorm->Branch("dark_q", dark_q,
+                  "dark_q[nch]/F"); // ADC x samples, sum of pulses in the baseline region
 
     tped = new TTree("pedestal", "WCMD pedestal-trigger production");
     tped->Branch("nch", &p_nch, "nch/I");
@@ -415,7 +416,8 @@ int produce(const std::vector<std::string> & inputs, const char * output, Long64
     tped->Branch("hmax2", p_hmax2, "hmax2[nch]/F");   // next largest, well away from the peak
     tped->Branch("gap2", p_gap2, "gap2[nch]/S");      // signed distance to it
     tped->Branch("qp_pos", p_qppos, "qp_pos[nch]/S"); // where the pulse-free gate was put
-    tped->Branch("dark_q", p_dark, "dark_q[nch]/F");  // ADC x samples, as the normal tree's, whole region
+    tped->Branch("dark_q", p_dark,
+                 "dark_q[nch]/F"); // ADC x samples, as the normal tree's, whole region
     for (int w = 0; w < nwin; w++) {
       const TString q = TString::Format("q_%d_%d", cfg.windows[w].first, cfg.windows[w].second);
       tped->Branch(q, p_q[w], TString::Format("%s[nch]/F", q.Data()));

@@ -25,16 +25,20 @@ import os
 import numpy as np
 from psmd_gain import prod_files
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--prod", default="/data/amore2/data/PROD", help="production directory")
-p.add_argument("--dir", default=".", help="where the input is and the output goes")
+p.add_argument("--prod", default="/data/amore2/data/PROD",
+               help="production directory")
+p.add_argument("--dir", default=".",
+               help="where the input is and the output goes")
 A = p.parse_args()
 PROD = A.prod
 
 
 def load_gain(run):
     return np.load(os.path.join(A.dir, f"gain_{run}.npz"))["g"]
+
 
 NMIN = 200                      # muon entries a channel needs for its own factor
 EDGES = np.linspace(0, 400, 2001)
@@ -56,7 +60,7 @@ def one_pass(run, c, parity):
     good = np.isfinite(g) & (g > 0)
     name = f"psmd_cal_{run}_{one_pass.n}"
     one_pass.n += 1
-    arr = lambda v: "{" + ", ".join(f"{x:.5f}" for x in v) + "}"
+    def arr(v): return "{" + ", ".join(f"{x:.5f}" for x in v) + "}"
     ROOT.gInterpreter.Declare(f"const float G_{name}[520] = {arr(np.where(good, g, 0))};\n"
                               f"const float C_{name}[520] = {arr(np.where(good, c, 1))};")
     ROOT.gInterpreter.Declare(f"""
@@ -92,7 +96,8 @@ def one_pass(run, c, parity):
            .Define("sel", f"Sel_{name}(pid, qg)").Filter("sel.size() > 0")
            .Define("spid", "ROOT::VecOps::Take(pid, sel)")
            .Define("sq", "ROOT::VecOps::Take(qc, sel)"))
-    h = d.Histo2D(("h", "", 520, 0.5, 520.5, len(EDGES) - 1, EDGES[0], EDGES[-1]), "spid", "sq")
+    h = d.Histo2D(("h", "", 520, 0.5, 520.5, len(EDGES) -
+                  1, EDGES[0], EDGES[-1]), "spid", "sq")
     return np.array([[h.GetBinContent(i, j) for j in range(1, h.GetNbinsY() + 1)]
                      for i in range(1, 521)])
 
@@ -116,7 +121,8 @@ def main(run):
     ok = live & (ne >= NMIN / 2)
     re, mede = residual(He, ok)
     c = np.where(ok, re, np.nan)
-    bad = live & ~ok                               # too few muons: mean of the module's other channels
+    # too few muons: mean of the module's other channels
+    bad = live & ~ok
     for i in np.where(bad)[0]:
         oth = [j for j in range(4 * (i // 4), 4 * (i // 4) + 4) if ok[j]]
         c[i] = np.mean(c[oth]) if oth else 1.0
@@ -126,11 +132,13 @@ def main(run):
     chk = ok & (no >= NMIN / 2)
     r0, _ = residual(Ho0, chk)
     r1, _ = residual(Ho1, chk)
-    print(f"even subruns: {ok.sum()} channels with >= {NMIN // 2} muons (median {np.median(ne[ok]):.0f})")
+    print(
+        f"even subruns: {ok.sum()} channels with >= {NMIN // 2} muons (median {np.median(ne[ok]):.0f})")
     print(f"odd subruns, {chk.sum()} channels: channel response rms  gain only {np.std(r0[chk]):.2%}  "
           f"-> with c {np.std(r1[chk]):.2%}")
     me, mo = residual(He, chk)[0], residual(Ho0, chk)[0]
-    print(f"even vs odd reproducibility of the channel response (gain only): {np.std(me[chk] / mo[chk]):.2%}")
+    print(
+        f"even vs odd reproducibility of the channel response (gain only): {np.std(me[chk] / mo[chk]):.2%}")
     # final factors: all subruns
     Ha = He + Ho0
     na = Ha.sum(1)

@@ -13,9 +13,11 @@ import numpy as np
 from psmd_gain import prod_files
 import ROOT
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--prod", default="/data/amore2/data/PROD", help="production directory")
+p.add_argument("--prod", default="/data/amore2/data/PROD",
+               help="production directory")
 p.add_argument("--dir", default=".", help="where the output goes")
 a = p.parse_args()
 
@@ -35,7 +37,8 @@ f = ROOT.TFile(os.path.join(a.dir, f"ped_hist_{a.run}.root"), "recreate")
 out = {}
 for k, h in hs.items():
     h.GetValue().Write()
-    out[k] = np.array([[h.GetBinContent(i, j) for j in range(1, h.GetNbinsY() + 1)] for i in range(1, 521)])
+    out[k] = np.array([[h.GetBinContent(i, j) for j in range(
+        1, h.GetNbinsY() + 1)] for i in range(1, 521)])
     nb, lo, hi = E[k]
     out[f"{k}_edges"] = np.linspace(lo, hi, nb + 1)
 f.Close()

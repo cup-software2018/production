@@ -7,10 +7,10 @@
 #include <cstdlib>
 #include <exception>
 
-#include "yaml-cpp/yaml.h"
-
 #include "TString.h"
 #include "TSystem.h"
+
+#include "yaml-cpp/yaml.h"
 
 // trgType 1 is the 0.1 Hz pedestal trigger on every board; everything else is
 // a normal trigger.
@@ -40,8 +40,7 @@ inline bool LoadYaml(const char * path, YAML::Node & n)
   }
   try {
     n = YAML::LoadFile(path);
-  }
-  catch (const std::exception & e) {
+  } catch (const std::exception & e) {
     printf("ERROR: cannot parse '%s': %s\n", path, e.what());
     return false;
   }

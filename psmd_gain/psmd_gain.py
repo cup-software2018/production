@@ -37,6 +37,7 @@ def define(df, t, col="q", name="psmd_gain_scale"):
     s = scale(t)
     if not hasattr(ROOT, name):
         vals = ", ".join("0" if not np.isfinite(x) else f"{x:.5f}" for x in s)
-        ROOT.gInterpreter.Declare(f"const float {name}[{len(s)}] = {{{vals}}};")
+        ROOT.gInterpreter.Declare(
+            f"const float {name}[{len(s)}] = {{{vals}}};")
     return df.Define(col, f"ROOT::RVec<float> o(nch); for (int i = 0; i < nch; i++) "
                           f"{{ float s = {name}[pid[i] - 1]; o[i] = s > 0 ? charge[i] / s : 0.f; }} return o;")

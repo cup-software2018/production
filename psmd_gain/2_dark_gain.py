@@ -10,9 +10,11 @@ import os
 import numpy as np
 from scipy.optimize import curve_fit
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--dir", default=".", help="where the input is and the output goes")
+p.add_argument("--dir", default=".",
+               help="where the input is and the output goes")
 a = p.parse_args()
 RUN = a.run
 h = np.load(os.path.join(a.dir, f"ped_hist_{RUN}.npz"))
@@ -58,7 +60,8 @@ for i in range(N):
     if ya.sum() < 1e4:
         continue                                        # dead channel: no dark pulses
     s = (xa > 150) & (xa < 500)
-    g0 = xa[s][np.argmax(ya[s])]                        # 1 p.e. pulse-area peak
+    # 1 p.e. pulse-area peak
+    g0 = xa[s][np.argmax(ya[s])]
     pk = [peak(ya, ea, n * g0, 0.35 * g0) for n in (1, 2, 3)]
     if all(pk):
         n = np.array([1., 2., 3.])
@@ -74,4 +77,5 @@ nlive = int(np.sum(h["area"].sum(1) >= 1e4))
 print(f"live {nlive}, g fitted {np.sum(~np.isnan(g))}")
 print(f"g median {np.nanmedian(g):.1f}, spread {np.nanstd(g) / np.nanmedian(g):.3%}, "
       f"stat err median {np.nanmedian(out['g_err']):.2f}, offset median {np.nanmedian(out['o']):.1f}")
-print("failed fits (live):", [i + 1 for i in range(N) if h["area"][i].sum() >= 1e4 and np.isnan(g[i])])
+print("failed fits (live):", [i + 1 for i in range(N)
+      if h["area"][i].sum() >= 1e4 and np.isnan(g[i])])

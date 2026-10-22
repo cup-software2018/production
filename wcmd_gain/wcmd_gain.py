@@ -40,7 +40,8 @@ def define(df, t, col="q", name="wcmd_gain_scale"):
     s = scale(t)
     if not hasattr(ROOT, name):
         vals = ", ".join("0" if not np.isfinite(x) else f"{x:.4f}" for x in s)
-        ROOT.gInterpreter.Declare(f"const float {name}[{len(s)}] = {{{vals}}};")
+        ROOT.gInterpreter.Declare(
+            f"const float {name}[{len(s)}] = {{{vals}}};")
     return df.Define(col, f"ROOT::RVec<float> o(nch); for (int i = 0; i < nch; i++) "
                           f"{{ int k = pid[i] - 1; float g = k >= 0 && k < {len(s)} ? {name}[k] : 0.f; "
                           f"o[i] = g > 0 ? charge[i] / g : 0.f; }} return o;")

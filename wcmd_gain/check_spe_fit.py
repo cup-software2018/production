@@ -3,18 +3,20 @@
     python check_spe_fit.py <run> [--dir DIR]     (needs dark_hist_<run>.root, spe_fit_<run>.npz)
         -> check_spe_fit_<run>.png, check_gain_<run>.png
 """
+import spe
+import matplotlib.pyplot as plt
 import argparse
 import os
 import numpy as np
 import ROOT
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import spe
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--dir", default=".", help="where the inputs are and the plots go")
+p.add_argument("--dir", default=".",
+               help="where the inputs are and the plots go")
 a = p.parse_args()
 RUN = a.run
 BLUE, ORANGE, GREEN = "#2a78d6", "#eb6834", "#1baf7a"
@@ -44,16 +46,21 @@ for k, ax in enumerate(axs.flat):
         ax.axis("off")
         continue
     pid = k + 1
-    y = sum(np.array([f.Get(f"h_q{r}").GetBinContent(pid, j) for j in range(1, ny + 1)]) for r in range(2))
+    y = sum(np.array([f.Get(f"h_q{r}").GetBinContent(pid, j)
+            for j in range(1, ny + 1)]) for r in range(2))
     nz = y > 0
-    ax.errorbar(x[nz], y[nz], yerr=np.sqrt(y[nz]), fmt="o", ms=1.8, lw=0.6, color=INK, capsize=0)
+    ax.errorbar(x[nz], y[nz], yerr=np.sqrt(y[nz]), fmt="o",
+                ms=1.8, lw=0.6, color=INK, capsize=0)
     q = P[k]
     if np.all(np.isfinite(q)):
         ax.plot(xx, spe.model(w)(xx, *q), color=INK2, lw=1.0, ls="--")
-        ax.plot(xx, spe.g(xx, q[i["a0"]], q[i["m0"]], q[i["sp"]], w), color=MUTED, lw=1.0)
+        ax.plot(xx, spe.g(xx, q[i["a0"]], q[i["m0"]],
+                q[i["sp"]], w), color=MUTED, lw=1.0)
         for n, c in ((1, BLUE), (2, ORANGE), (3, GREEN)):
-            ax.plot(xx, spe.pe(xx, q[i[f"a{n}"]], n, q[i["mu"]], q[i["s1"]], q[i["sp"]], w), color=c, lw=1.0)
-        ax.set_title(f"PID {pid}: g {q[i['mu']]:.1f} ± {E[k, i['mu']]:.1f}, χ²/ndf {chi2[k]:.0f}/{ndf[k]}", fontsize=9)
+            ax.plot(xx, spe.pe(
+                xx, q[i[f"a{n}"]], n, q[i["mu"]], q[i["s1"]], q[i["sp"]], w), color=c, lw=1.0)
+        ax.set_title(
+            f"PID {pid}: g {q[i['mu']]:.1f} ± {E[k, i['mu']]:.1f}, χ²/ndf {chi2[k]:.0f}/{ndf[k]}", fontsize=9)
     else:
         ax.set_title(f"PID {pid}: fit failed", fontsize=9)
     ax.set_yscale("log")
@@ -72,13 +79,17 @@ g, ge = P[:, i["mu"]], E[:, i["mu"]]
 ok = np.isfinite(g)
 pid = np.arange(1, 48)
 gm = np.median(g[ok])
-fig, ax = plt.subplots(1, 3, figsize=(17, 4.6), gridspec_kw=dict(width_ratios=[2.2, 1, 1]))
-ax[0].errorbar(pid[ok], g[ok], yerr=ge[ok], fmt="o", ms=4, color=BLUE, capsize=0)
+fig, ax = plt.subplots(1, 3, figsize=(
+    17, 4.6), gridspec_kw=dict(width_ratios=[2.2, 1, 1]))
+ax[0].errorbar(pid[ok], g[ok], yerr=ge[ok],
+               fmt="o", ms=4, color=BLUE, capsize=0)
 ax[0].axhline(gm, color=MUTED, lw=1, ls="--")
 ax[0].set_xlabel("PID")
 ax[0].set_ylabel("g = 1 p.e. mean  [ADC·sample / p.e.]")
-ax[0].set_title(f"gain per tank PMT, median {gm:.1f}, spread {np.std(g[ok]) / gm:.1%}")
-ax[1].hist(g[ok], np.linspace(gm * 0.85, gm * 1.15, 31), histtype="step", color=BLUE, lw=1.6)
+ax[0].set_title(
+    f"gain per tank PMT, median {gm:.1f}, spread {np.std(g[ok]) / gm:.1%}")
+ax[1].hist(g[ok], np.linspace(gm * 0.85, gm * 1.15, 31),
+           histtype="step", color=BLUE, lw=1.6)
 ax[1].set_xlabel("g  [ADC·sample / p.e.]")
 ax[1].set_ylabel("PMTs")
 ax[1].set_title(f"{ok.sum()} PMTs")
@@ -86,7 +97,8 @@ ax[2].plot(pid[ok], (chi2 / ndf)[ok], "o", ms=4, color=ORANGE)
 ax[2].set_xlabel("PID")
 ax[2].set_ylabel("χ² / ndf")
 ax[2].set_title("fit quality")
-fig.suptitle(f"WCMD PMT gain from the dark pulses — run {RUN}", x=0.01, ha="left", color=INK)
+fig.suptitle(
+    f"WCMD PMT gain from the dark pulses — run {RUN}", x=0.01, ha="left", color=INK)
 fig.tight_layout()
 fig.savefig(os.path.join(a.dir, f"check_gain_{RUN}.png"), dpi=130)
 print(f"-> check_spe_fit_{RUN}.png, check_gain_{RUN}.png")

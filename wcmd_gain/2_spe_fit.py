@@ -14,9 +14,11 @@ import numpy as np
 import ROOT
 import spe
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--dir", default=".", help="where the input is and the output goes")
+p.add_argument("--dir", default=".",
+               help="where the input is and the output goes")
 a = p.parse_args()
 RUN = a.run
 NTANK = 47
@@ -36,7 +38,8 @@ live = np.zeros(NTANK)
 bias = np.array([hb.GetBinContent(k) for k in range(1, NTANK + 1)])
 for k in range(NTANK):
     pid = k + 1
-    y = sum(np.array([f.Get(f"h_q{r}").GetBinContent(pid, j) for j in range(1, ny + 1)]) for r in range(2))
+    y = sum(np.array([f.Get(f"h_q{r}").GetBinContent(pid, j)
+            for j in range(1, ny + 1)]) for r in range(2))
     live[k] = sum(f.Get(f"h_n{r}").GetBinContent(pid) for r in range(2)) * 2e-9
     r = spe.fit(x, y)
     if r is None:

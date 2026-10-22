@@ -17,11 +17,14 @@ import re
 import ROOT
 from wcmd_gain import prod_files
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("run", type=int)
-p.add_argument("--prod", default="/data/amore2/data/PROD", help="production directory")
+p.add_argument("--prod", default="/data/amore2/data/PROD",
+               help="production directory")
 p.add_argument("--dir", default=".", help="where the output goes")
-p.add_argument("--subruns", default=None, help="FIRST:LAST, only these subruns (for tests)")
+p.add_argument("--subruns", default=None,
+               help="FIRST:LAST, only these subruns (for tests)")
 a = p.parse_args()
 ROOT.gROOT.SetBatch(True)
 
@@ -35,7 +38,8 @@ if not files:
 f0 = ROOT.TFile.Open(files[0])
 nlo, nhi = map(int, re.findall(r"\d+", f0.Get("window_normal").GetTitle()))
 wped = f0.Get("window_pedestal").GetTitle()
-nped = 1008 if wped == "whole record" else (lambda x, y: y - x)(*map(int, re.findall(r"\d+", wped)))
+nped = 1008 if wped == "whole record" else (
+    lambda x, y: y - x)(*map(int, re.findall(r"\d+", wped)))
 f0.Close()
 
 out = ROOT.TFile(os.path.join(a.dir, f"dark_hist_{a.run}.root"), "recreate")
@@ -43,7 +47,8 @@ for r, (tree, length) in enumerate([("pedestal", nped), ("normal", nhi - nlo)]):
     ch = ROOT.TChain(tree)
     for f in files:
         ch.Add(f)
-    hq = ROOT.TH2D(f"h_q{r}", f"{tree};PID;dark_q [ADC*sample]", 49, 0.5, 49.5, 300, -50, 550)
+    hq = ROOT.TH2D(
+        f"h_q{r}", f"{tree};PID;dark_q [ADC*sample]", 49, 0.5, 49.5, 300, -50, 550)
     hn = ROOT.TH1D(f"h_n{r}", f"{tree};PID;samples scanned", 49, 0.5, 49.5)
     ch.Draw(f"dark_q:pid>>h_q{r}", "dark_q != 0", "goff")
     ch.Draw(f"pid>>h_n{r}", f"{length}", "goff")
@@ -51,7 +56,8 @@ for r, (tree, length) in enumerate([("pedestal", nped), ("normal", nhi - nlo)]):
     hq.Write()
     hn.Write()
     if tree == "pedestal":
-        hb = ROOT.TProfile("h_bias", "baseline bias of a 25-sample window;PID;ADC*sample", 49, 0.5, 49.5)
+        hb = ROOT.TProfile(
+            "h_bias", "baseline bias of a 25-sample window;PID;ADC*sample", 49, 0.5, 49.5)
         ch.Draw("qp_8_24 * 25. / 33.:pid>>h_bias", "", "goff prof")
         out.cd()
         hb.Write()

@@ -41,7 +41,8 @@ def fit(x, y):
     p0 = [y[s & (x < 20)].sum(), 5, 5, big, 37, 14, 0.05 * big, 0.005 * big]
     try:
         p, cov = curve_fit(model(w), x[s], y[s], p0=p0, sigma=np.sqrt(y[s] + 1), absolute_sigma=True,
-                           bounds=([0, -10, 1, 0, 15, 3, 0, 0], [np.inf, 20, 20, np.inf, 80, 40, np.inf, np.inf]),
+                           bounds=([0, -10, 1, 0, 15, 3, 0, 0], [np.inf,
+                                   20, 20, np.inf, 80, 40, np.inf, np.inf]),
                            maxfev=20000)
     except RuntimeError:
         return None

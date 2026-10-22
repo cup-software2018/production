@@ -15,18 +15,22 @@ import os
 import numpy as np
 from psmd_gain import prod_files
 
-pa = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+pa = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 pa.add_argument("what", choices=("hist", "plot"))
 pa.add_argument("run", type=int)
-pa.add_argument("--prod", default="/data/amore2/data/PROD", help="production directory")
-pa.add_argument("--dir", default=".", help="where the inputs are and the outputs go")
+pa.add_argument("--prod", default="/data/amore2/data/PROD",
+                help="production directory")
+pa.add_argument("--dir", default=".",
+                help="where the inputs are and the outputs go")
 A = pa.parse_args()
 PROD = A.prod
 
 
 def load_gain(run):
     """g by PID-1 from the table (nan for dead channels)."""
-    pid, g = np.loadtxt(os.path.join(A.dir, f"psmd_gain_{run}.txt"), comments="#", usecols=(0, 1), unpack=True)
+    pid, g = np.loadtxt(os.path.join(
+        A.dir, f"psmd_gain_{run}.txt"), comments="#", usecols=(0, 1), unpack=True)
     return g[np.argsort(pid)]
 
 
@@ -35,7 +39,8 @@ def define_npe(df, run):
     g = load_gain(run)
     if not hasattr(ROOT, "psmd_g_only"):
         vals = ", ".join("0" if not np.isfinite(x) else f"{x:.4f}" for x in g)
-        ROOT.gInterpreter.Declare(f"const float psmd_g_only[{len(g)}] = {{{vals}}};")
+        ROOT.gInterpreter.Declare(
+            f"const float psmd_g_only[{len(g)}] = {{{vals}}};")
     return df.Define("npe", "ROOT::RVec<float> o(nch); for (int i = 0; i < nch; i++) "
                             "{ float gg = psmd_g_only[pid[i] - 1]; o[i] = gg > 0 ? charge[i] / gg : 0.f; } return o;")
 
@@ -69,6 +74,7 @@ def hist(run):
            .Define("sn", "ROOT::VecOps::Take(npe, sel)"))
     ha = d.Histo2D(("ha", "", 520, 0.5, 520.5, 1000, 0, 100000), "spid", "sq")
     hn = d.Histo2D(("hn", "", 520, 0.5, 520.5, 1000, 0, 360), "spid", "sn")
+
     def arr(h):
         return np.array([[h.GetBinContent(i, j) for j in range(1, h.GetNbinsY() + 1)]
                          for i in range(1, h.GetNbinsX() + 1)])
@@ -108,15 +114,21 @@ def plot(run):
     pid = np.arange(1, 521)
     g = load_gain(run)
     sa, sn = np.nanstd(ra[ok]), np.nanstd(rn[ok])
-    print(f"channels with >= 200 muon entries: {ok.sum()} (median {np.median(n[ok]):.0f} entries)")
-    print(f"muon median per channel, rms over channels: before {sa:.2%}, after {sn:.2%}")
-    print(f"gain rms over the same channels: {np.nanstd(g[ok]) / np.nanmedian(g[ok]):.2%}")
+    print(
+        f"channels with >= 200 muon entries: {ok.sum()} (median {np.median(n[ok]):.0f} entries)")
+    print(
+        f"muon median per channel, rms over channels: before {sa:.2%}, after {sn:.2%}")
+    print(
+        f"gain rms over the same channels: {np.nanstd(g[ok]) / np.nanmedian(g[ok]):.2%}")
     print(f"corr(before, gain) = {np.corrcoef(ra[ok], g[ok])[0, 1]:.2f}, "
           f"corr(after, gain) = {np.corrcoef(rn[ok], g[ok])[0, 1]:.2f}")
 
-    fig, ax = plt.subplots(1, 3, figsize=(17, 4.6), gridspec_kw=dict(width_ratios=[2.2, 1, 1]))
-    ax[0].plot(pid[ok], ra[ok], "o", ms=3, color=BLUE, label=f"before (ADC·sample), rms {sa:.1%}")
-    ax[0].plot(pid[ok], rn[ok], "o", ms=3, color=ORANGE, label=f"after (p.e.), rms {sn:.1%}")
+    fig, ax = plt.subplots(1, 3, figsize=(
+        17, 4.6), gridspec_kw=dict(width_ratios=[2.2, 1, 1]))
+    ax[0].plot(pid[ok], ra[ok], "o", ms=3, color=BLUE,
+               label=f"before (ADC·sample), rms {sa:.1%}")
+    ax[0].plot(pid[ok], rn[ok], "o", ms=3, color=ORANGE,
+               label=f"after (p.e.), rms {sn:.1%}")
     ax[0].axhline(1, color=MUTED, lw=1, ls="--")
     ax[0].set_xlim(0, 521)
     ax[0].set_xlabel("PID")
@@ -137,7 +149,8 @@ def plot(run):
     ax[2].set_ylabel("muon median / median over channels")
     ax[2].set_title("response vs gain")
     ax[2].legend(loc="upper left")
-    fig.suptitle(f"Gain matching check with clean muons — run {run}", x=0.01, ha="left", color=INK)
+    fig.suptitle(
+        f"Gain matching check with clean muons — run {run}", x=0.01, ha="left", color=INK)
     fig.tight_layout()
     fig.savefig(os.path.join(A.dir, f"check_gain_match_{run}.png"), dpi=130)
 

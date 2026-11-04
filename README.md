@@ -37,22 +37,22 @@ A whole run, on the cluster, one job per subrun:
 One subrun of every detector, FADC1, FADC2 and then the IADC, wherever it is
 called (each Slurm task is one of these):
 
-    ./prod_all.sh <run> <subrun>
+    ./prod_all_subrun.sh <run> <subrun>
 
 One subrun of one detector:
 
-    ./prod.sh <fadc|iadc> <run> <subrun> [boards]
+    ./prod_subrun.sh <fadc|iadc> <run> <subrun> [boards]
 
-    OUT=/tmp/t ./prod.sh fadc <run> <subrun>     FADC1 and FADC2
-    OUT=/tmp/t ./prod.sh fadc <run> <subrun> 2   FADC2 only
-    OUT=/tmp/t ./prod.sh iadc <run> <subrun>     IADC
+    OUT=/tmp/t ./prod_subrun.sh fadc <run> <subrun>     FADC1 and FADC2
+    OUT=/tmp/t ./prod_subrun.sh fadc <run> <subrun> 2   FADC2 only
+    OUT=/tmp/t ./prod_subrun.sh iadc <run> <subrun>     IADC
 
-`prod.sh` decides every path: the raw file under `RAW`
+`prod_subrun.sh` decides every path: the raw file under `RAW`
 (`/data/amore2/data/RAW`), the output and its log under `OUT` (`out/` here),
 the settings `CFG` (`prod_<det>.yaml`) and the program `BIN`
 (`build/produce_<det>`), each overridable from the environment.  A stream with
 no raw file for the subrun is skipped with a note; the exit status is 1 if any
-stream fails and 3 if none has input.  `prod_all.sh` calls it for `fadc` and
+stream fails and 3 if none has input.  `prod_all_subrun.sh` calls it for `fadc` and
 `iadc` with each one's `prod_<det>.yaml`, skips a detector with no input, and
 fails if any producer fails.  Run by hand both need a build first, and an `OUT`
 this machine can write: `out/` links to `/data/cupsoft`, which it cannot.
@@ -69,11 +69,11 @@ qserver).
 
 `submit.sh` builds both producers here with CMake before anything is
 submitted: the nodes have the yaml-cpp runtime but not its headers.  The
-programs, `prod.sh`, `prod_all.sh`, the two configs and the list of subruns
+programs, `prod_subrun.sh`, `prod_all_subrun.sh`, the two configs and the list of subruns
 (those with raw data for any detector) then go to a fresh
 `stage/<run>_<time>/` directory under `RDIR` on qserver, so a later
 submission cannot change the code under jobs that are still running.  Task i
-runs that `prod_all.sh` on line i of `subruns.txt`.
+runs that `prod_all_subrun.sh` on line i of `subruns.txt`.
 
 The nodes see qserver's `/home` and `/data`, not this machine's `/scratch`, and
 cupsoft is uid 1000 here but 1005 there, so this side cannot write to
@@ -104,7 +104,7 @@ so the end-of-run summary is computed on qserver.
     build/produce_iadc -c prod_iadc.yaml -o t.root $R/IADC_<run:06d>.root.<sub:05d>
 
 The producers take raw files and an output file and nothing else; where the
-raw data lives and where the output goes is decided in `prod.sh`.  Run, board
+raw data lives and where the output goes is decided in `prod_subrun.sh`.  Run, board
 and subrun are read from the DAQ's file names (`FADC<b>_<run>.root.<sub>`,
 `IADC_<run>.root.<sub>`).  Several FADC inputs are chained into one output, in
 the order given, and must be the same run and board.  The `input` provenance

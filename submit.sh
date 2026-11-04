@@ -11,8 +11,8 @@
 #   CFG_FADC=scan.yaml ./submit.sh <run> 8 0 9
 #
 # CFG_FADC and CFG_IADC replace prod_fadc.yaml and prod_iadc.yaml for this
-# submission.  Each Slurm task runs prod_all.sh for one subrun, which runs
-# prod.sh for each detector.  One subrun per job rather than a contiguous
+# submission.  Each Slurm task runs prod_all_subrun.sh for one subrun, which runs
+# prod_subrun.sh for each detector.  One subrun per job rather than a contiguous
 # block each: a slow subrun then holds up one slot instead of a whole block,
 # and a job that dies costs one subrun to redo.  The output is one file per
 # subrun per stream, which is what a TChain wants anyway, so nothing is merged
@@ -69,7 +69,7 @@ for c in "$CFG_FADC" "$CFG_IADC"; do [ -f "$c" ] || { echo "no config $c"; exit 
   >"$HERE/build.log" 2>&1 || { echo "build failed, see $HERE/build.log"; exit 1; }
 
 # The subruns with raw data for at least one stream, one per line, and the
-# log prod.sh will write for each stream that has it.
+# log prod_subrun.sh will write for each stream that has it.
 list=$(mktemp)
 logs=$(mktemp)
 trap 'rm -f "$list" "$logs"' EXIT
@@ -99,9 +99,9 @@ nsub=$(wc -l <"$list")
 
 q "mkdir -p '$STAGE/slurm' '$OUT/log'" || {
   echo "cannot reach $QHOST"; exit 1; }
-# prod.sh finds produce_<det> and prod_<det>.yaml beside itself.
-rsync -a "$HERE/build/produce_fadc" "$HERE/build/produce_iadc" "$HERE/prod.sh" \
-  "$HERE/prod_all.sh" "$QHOST:$STAGE/" &&
+# prod_subrun.sh finds produce_<det> and prod_<det>.yaml beside itself.
+rsync -a "$HERE/build/produce_fadc" "$HERE/build/produce_iadc" "$HERE/prod_subrun.sh" \
+  "$HERE/prod_wcmd_subrun.sh" "$HERE/prod_psmd_subrun.sh" "$HERE/prod_all_subrun.sh" "$QHOST:$STAGE/" &&
 rsync -a "$CFG_FADC" "$QHOST:$STAGE/prod_fadc.yaml" &&
 rsync -a "$CFG_IADC" "$QHOST:$STAGE/prod_iadc.yaml" &&
 rsync -a "$list" "$QHOST:$STAGE/subruns.txt" || {
@@ -117,11 +117,11 @@ else
   echo "note: $HERE/out is a real directory, not linked to $OUT"
 fi
 
-# Task i runs prod_all.sh on line OFFSET+i of subruns.txt.  $sub and the task id
+# Task i runs prod_all_subrun.sh on line OFFSET+i of subruns.txt.  $sub and the task id
 # must be expanded on the node, not by the shell on qserver, so the command is
 # quoted once more (%q) for the ssh hop.
 task='sub=$(sed -n "$((OFFSET + SLURM_ARRAY_TASK_ID))p" '"$STAGE/subruns.txt"') && '
-task+="OUT=$OUT exec $STAGE/prod_all.sh $RUN "'"$sub"'
+task+="OUT=$OUT exec $STAGE/prod_all_subrun.sh $RUN "'"$sub"'
 
 # Arrays of at most MAXARRAY tasks, each starting after the one before it, so
 # no more than NJOBS run at once however long the list is.

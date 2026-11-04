@@ -1,15 +1,23 @@
 # produce_fadc settings; keys left out keep the default.  Samples of 2 ns, record 1008.
 # Charges in ADC*sample.  Keys: README.md.
+#
+# The light moves with the FADC DLY of the run, so the windows are environment variables
+# that prod_wcmd_subrun.sh sets from the run config (FADCT DLY in
+# /data/amore2/data/CONFIG/<run>.yml), around the signal edge E (rule in the script):
+#
+#   DLY    E    window_normal  integration
+#   1100   232  [0, 200)       [232, 416)
+#   1500   432  [0, 400)       [432, 616)
 
 baseline:
   clip_sigma: 4.0               # one-sided pulse rejection, on the parity-subtracted deviation
   iters: 4                      # repeats of it (stops when stable)
-  window_normal: [0, 200]       # normal triggers: in front of the signal; also the dark_q region
+  window_normal: [0, ${FADC_BASE_HI}]   # [0, E - 32): in front of the signal; also the dark_q region
   window_pedestal: [0, 1008]    # pedestal triggers: the whole record
   exclude_pedestal: [-15, 50]   # ... minus this, relative to the peak
 
 normal:
-  integration: [232, 416]       # signal window (DLY 1100; DLY 1500: [432, 616])
+  integration: [${FADC_INT_LO}, ${FADC_INT_HI}]   # [E, E + 184): signal window
   pulse:                        # 4 sigma excursions, widened by pre/post, merged, summed
     nsigma: 4.0
     pre: 3

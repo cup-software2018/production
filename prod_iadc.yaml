@@ -1,12 +1,21 @@
 # produce_iadc settings; keys left out keep the default.  Samples of 16 ns, record 62.
 # Keys and algorithm: README.md.
+#
+# The pulse moves with the IADC DLY of the run, so the windows are environment variables
+# that prod_psmd_subrun.sh sets from the run config (IADCT DLY in /data/amore2/data/CONFIG/<run>.yml),
+# around the pulse peak P (rule in prod_psmd_subrun.sh):
+#
+#   DLY    P   window_normal  integration
+#   2200   26  [0, 14)        [16, 48)
+#   3500   65  [0, 53)        [55, 87)
+#   4096   83  [0, 71)        [73, 105)
 
 baseline:
-  window_normal: [0, 14]        # normal triggers, in front of the pulse (diagnostic)
+  window_normal: [0, ${IADC_BASE_HI}]           # [0, P - 12); the pulse leaks in from P - 6
   window_pedestal: [0, 0]       # pedestal triggers; [0, 0] = the whole record
 
 normal:
-  integration: [16, 48]         # 99.8 % of the mean pulse
+  integration: [${IADC_INT_LO}, ${IADC_INT_HI}]  # [P - 10, P + 22), >= 99.8 % of the mean pulse
   cf: 0.5                       # constant fraction for tlead, tcf
   baseline: fit                 # fit (flat + dark pulses in window_normal) or header
 

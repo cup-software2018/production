@@ -63,24 +63,10 @@ log=$OUT/log/IADC_$SUBSTR.log
 [ -f "$CFG" ] || { echo "no config $CFG"; exit 1; }
 mkdir -p "$OUT/log" || exit 1
 
-# Windows from the DLY.  The pulse peaks at P = round((DLY - 1350) / 32.9)
-# (runs 271-343, within 1 sample); the baseline is [0, P - 12), the pulse
-# leaking in from P - 6, and the integration [P - 10, P + 22), >= 99.8 % of
-# the mean pulse.  P + 22 stays in a 126-sample record (RL 16) up to DLY ~4770.
-runcfg=$CONF/$RUNSTR.yml
-[ -f "$runcfg" ] || { echo "no run config $runcfg for the IADC DLY"; exit 1; }
-# every DLY in the IADCT block, one per board
-dlys=$(awk '/^[^ -]/ { in_iadc = ($1 == "IADCT:"); next } in_iadc' "$runcfg" |
-       grep -oE '\bDLY: *[0-9]+' | grep -oE '[0-9]+' | sort -u)
-if [ "$(echo "$dlys" | grep -c .)" -ne 1 ]; then
-  echo "IADC DLY in $runcfg is not one value: $(echo $dlys)"; exit 1
-fi
-read -r dly peak IADC_BASE_HI IADC_INT_LO IADC_INT_HI < <(awk -v d="$dlys" 'BEGIN {
-  d -= (d % 1000) % 16                  # the firmware drops the low 4 bits of the ns part
-  p = int((d - 1350) / 32.9 + 0.5)
-  print d, p, p - 12, p - 10, p + 22 }')
-export IADC_BASE_HI IADC_INT_LO IADC_INT_HI
-dlynote="IADC DLY $dly ns ($runcfg) -> peak $peak: window_normal [0,$IADC_BASE_HI), integration [$IADC_INT_LO,$IADC_INT_HI)"
+# Windows from the DLY (windows.sh).
+. "$HERE/windows.sh"
+iadc_windows "$CONF/$RUNSTR.yml" || exit 1
+dlynote=$WINDOWS_NOTE
 echo "$dlynote"
 
 # thisroot.sh and setup_cupdm.sh append to these, so they must exist under `set -u`.

@@ -9,8 +9,14 @@ out
 out_local/
 test_out/
 *.root
+*.root.[0-9]*
 *.log
 __pycache__/
+
+# Local test settings (runs 354/355 CW test, DAQ FADCT block)
+prod_fadc_354.yaml
+prod_fadc_355.yaml
+fadct.yml
 
 # Editor / local history
 .lh/

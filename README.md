@@ -52,7 +52,10 @@ One subrun of one detector:
 the settings `CFG` (`prod_<det>.yaml`) and the program `BIN`
 (`build/produce_<det>`), each overridable from the environment.  A stream with
 no raw file for the subrun is skipped with a note; the exit status is 1 if any
-stream fails and 3 if none has input.  `prod_all_subrun.sh` calls it for `fadc` and
+stream fails and 3 if none has input.  The windows follow the run's DLY in
+`CONF/<run:06d>.yml` (`/data/amore2/data/CONFIG`) and are worked out in
+`windows.sh` only, which the scripts here and autoprod source.
+`prod_all_subrun.sh` calls it for `fadc` and
 `iadc` with each one's `prod_<det>.yaml`, skips a detector with no input, and
 fails if any producer fails.  Run by hand both need a build first, and an `OUT`
 this machine can write: `out/` links to `/data/cupsoft`, which it cannot.
@@ -69,7 +72,7 @@ qserver).
 
 `submit.sh` builds both producers here with CMake before anything is
 submitted: the nodes have the yaml-cpp runtime but not its headers.  The
-programs, `prod_subrun.sh`, `prod_all_subrun.sh`, the two configs and the list of subruns
+programs, the `prod_*.sh` scripts, `windows.sh`, the two configs and the list of subruns
 (those with raw data for any detector) then go to a fresh
 `stage/<run>_<time>/` directory under `RDIR` on qserver, so a later
 submission cannot change the code under jobs that are still running.  Task i

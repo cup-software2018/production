@@ -101,7 +101,8 @@ q "mkdir -p '$STAGE/slurm' '$OUT/log'" || {
   echo "cannot reach $QHOST"; exit 1; }
 # prod_subrun.sh finds produce_<det> and prod_<det>.yaml beside itself.
 rsync -a "$HERE/build/produce_fadc" "$HERE/build/produce_iadc" "$HERE/prod_subrun.sh" \
-  "$HERE/prod_wcmd_subrun.sh" "$HERE/prod_psmd_subrun.sh" "$HERE/prod_all_subrun.sh" "$QHOST:$STAGE/" &&
+  "$HERE/prod_wcmd_subrun.sh" "$HERE/prod_psmd_subrun.sh" "$HERE/prod_all_subrun.sh" \
+  "$HERE/windows.sh" "$QHOST:$STAGE/" &&
 rsync -a "$CFG_FADC" "$QHOST:$STAGE/prod_fadc.yaml" &&
 rsync -a "$CFG_IADC" "$QHOST:$STAGE/prod_iadc.yaml" &&
 rsync -a "$list" "$QHOST:$STAGE/subruns.txt" || {

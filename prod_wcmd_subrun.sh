@@ -62,18 +62,10 @@ SUBSTR=$(printf "%05d" "$((10#$SUB))")
 [ -f "$CFG" ] || { echo "no config $CFG"; exit 1; }
 mkdir -p "$OUT/log" || exit 1
 
-# Windows from the DLY, the same on every board.  At 2 ns per sample the
-# light starts at E = 232 + (DLY - 1100) / 2 (tank and door, runs 263, 301,
-# 308, 342, to the sample); the baseline is [0, E - 32) and the integration
-# [E, E + 184).  E + 184 stays in the 1008-sample record up to DLY 2284.
-runcfg=$CONF/$RUNSTR.yml
-[ -f "$runcfg" ] || { echo "no run config $runcfg for the FADC DLY"; exit 1; }
-dly=$(awk '/^[^ -]/ { in_fadc = ($1 == "FADCT:"); next } in_fadc' "$runcfg" |
-      grep -oE '\bDLY: *[0-9]+' | grep -oE '[0-9]+' | head -1)
-[ -n "$dly" ] || { echo "no FADCT DLY in $runcfg"; exit 1; }
-edge=$((232 + (dly - 1100) / 2))
-export FADC_BASE_HI=$((edge - 32)) FADC_INT_LO=$edge FADC_INT_HI=$((edge + 184))
-dlynote="FADC DLY $dly ns ($runcfg) -> edge $edge: window_normal [0,$FADC_BASE_HI), integration [$FADC_INT_LO,$FADC_INT_HI)"
+# Windows from the DLY, the same on every board (windows.sh).
+. "$HERE/windows.sh"
+fadc_windows "$CONF/$RUNSTR.yml" || exit 1
+dlynote=$WINDOWS_NOTE
 echo "$dlynote"
 
 # thisroot.sh and setup_cupdm.sh append to these, so they must exist under `set -u`.

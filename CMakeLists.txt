@@ -21,10 +21,11 @@ find_package(ROOT REQUIRED COMPONENTS Core RIO Tree MathCore)
 find_package(CUPDataModel REQUIRED
              HINTS /home/cupsoft/Products/CUPDATAMODEL/V1.1/lib64/cmake/CUPDataModel)
 find_package(yaml-cpp REQUIRED)
+find_package(Threads REQUIRED)       # produce_iadc -j
 
 foreach(det fadc iadc)
   add_executable(produce_${det} produce_${det}.cc)
   target_compile_options(produce_${det} PRIVATE -Wall -Wextra)
   target_link_libraries(produce_${det} PRIVATE
-    ROOT::Core ROOT::RIO ROOT::Tree ROOT::MathCore CUPDataModel::RawObjs yaml-cpp)
+    ROOT::Core ROOT::RIO ROOT::Tree ROOT::MathCore CUPDataModel::RawObjs yaml-cpp Threads::Threads)
 endforeach()

@@ -17,6 +17,7 @@
 #   RAW  /data/amore2/data/RAW     raw data, <RAW>/<run:06d>/IADC_<run:06d>.root.<sub:05d>
 #   BIN  <here>/produce_iadc, or <here>/build/produce_iadc if that is absent
 #   CONF /data/amore2/data/CONFIG  run configs, <CONF>/<run:06d>.yml
+#   IADC_THREADS 1                 threads of produce_iadc (-j)
 #
 # The windows follow the run's IADC DLY, read from the run config, and reach
 # prod_iadc.yaml as ${IADC_BASE_HI}, ${IADC_INT_LO}, ${IADC_INT_HI}.
@@ -83,7 +84,7 @@ source /home/cupsoft/Products/CUPDATAMODEL/V1.1/setup_cupdm.sh >/dev/null
 {
   echo "host $(hostname)  $(date '+%F %T')"
   echo "$dlynote"
-  "$BIN" -c "$CFG" -o "$out" "$in"
+  "$BIN" -c "$CFG" -j "${IADC_THREADS:-1}" -o "$out" "$in"
   rc=$?
   echo "exit $rc  $(date '+%F %T')"
 } >"$log" 2>&1

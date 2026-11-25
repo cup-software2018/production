@@ -2,15 +2,17 @@
 // `normal` and `pedestal` (0.1 Hz random trigger), names as in produce_fadc.cc.
 // Algorithm, settings and output: README.md.
 //
-//   produce_iadc -c prod_iadc.yaml -o out/prod_IADC_<run>.<sub>.root
+//   produce_iadc -c prod_iadc.yaml [-j threads] -o out/prod_IADC_<run>.<sub>.root
 //                /data/amore2/data/RAW/<run>/IADC_<run>.root.<sub>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <getopt.h>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -447,7 +449,7 @@ private:
   }
 };
 
-int produce(const char * in, const char * out, const char * cfgPath)
+int produce(const char * in, const char * out, const char * cfgPath, int nthreads)
 {
   TString stream;
   int run = -1, sub = -1;
@@ -485,6 +487,7 @@ int produce(const char * in, const char * out, const char * cfgPath)
   printf("config : %s\n", cfg.path.Data());
   printf("input  : %s  (%lld events)\n", in, tin->GetEntries());
   printf("output : %s\n", out);
+  printf("threads: %d\n", nthreads);
   printf("normal   : baseline [%d,%d)  integration [%d,%d)  cf %.2f\n", cfg.normLo, cfg.normHi,
          cfg.intLo, cfg.intHi, cfg.cf);
   printf("normal   : charge baseline %s\n",
@@ -569,75 +572,141 @@ int produce(const char * in, const char * out, const char * cfgPath)
   book(tnorm, false);
   book(tped, true);
 
-  TStopwatch watch;
-  Long64_t nshort = 0;
-  const Long64_t n = tin->GetEntries();
-  for (Long64_t i = 0; i < n; i++) {
-    tin->GetEntry(i);
-    const bool isPed = info->GetTriggerType() == kPedTrigType;
-    evtNum = info->GetEventNumber();
-    trgNum = info->GetTriggerNumber();
-    trgTime = info->GetTriggerTime();
-    nch = 0;
-    nhit = 0;
-    npulse = 0;
-    std::set<int> mods;
-    for (int j = 0; j < data->GetN() && nch < kMaxCh; j++) {
-      const FChannel * ch = data->Get(j);
-      const int nd = std::min(ch->GetNdp(), kMaxNdp);
+  // Events are read in batches in file order (ROOT I/O stays on this thread),
+  // the channels of a batch are measured and fitted on nthreads threads, and the
+  // trees are filled in file order again, so the output does not depend on
+  // nthreads.  The workers touch no ROOT object.
+  struct Chan {
+    unsigned short id, bit, hped;
+    int nd;
+    std::vector<unsigned short> w;
+    // results
+    double lvl;
+    DarkFitResult fn;
+    ChanResult r;
+  };
+  struct Event {
+    bool isPed;
+    UInt_t evtNum, trgNum;
+    ULong64_t trgTime;
+    std::vector<Chan> ch;
+  };
+  auto work = [&](Event & ev) {
+    for (Chan & c : ev.ch) {
+      const int nd = c.nd;
       const int pHi = pedHi > 0 ? pedHi : nd;
-      if (nd < cfg.intHi || nd < cfg.normHi || nd < pHi) {
-        nshort++;
-        continue;
-      }
-      const unsigned short * wv = ch->GetWaveform();
-      const double hped = ch->GetPedestal();
+      const unsigned short * wv = c.w.data();
+      const double hped = c.hped;
       double y[kMaxNdp];
       for (int k = 0; k < nd; k++)
         y[k] = wv[k] - hped;
 
       // one fit gives the level and the dark pulses
-      double lvl = 0;
-      DarkFitResult fn;
-      if (isPed ? (cfg.fit || cfg.normFit) : cfg.normFit)
-        fn = isPed ? fitter.Fit(y, 0, nd) : fitter.Fit(y, cfg.normLo, cfg.normHi);
-      if (cfg.normFit && fn.ok) lvl = fn.b; // a failed fit falls back to the header pedestal
-      const ChanResult r = isPed ? Measure(wv, nd, hped + lvl, pedLo, pHi, cfg)
-                                 : Measure(wv, nd, hped + lvl, cfg.normLo, cfg.normHi, cfg);
-      qbase[nch] = lvl;
-      pid[nch] = ch->GetID();
-      tbit[nch] = ch->GetBit();
-      ped[nch] = ch->GetPedestal();
-      base[nch] = r.base;
-      rms[nch] = r.rms;
-      qpre[nch] = r.qpre;
-      hmax[nch] = r.hmax;
-      hmaxx[nch] = r.hmaxx;
-      tlead[nch] = r.tlead;
-      tcf[nch] = r.tcf;
-      nsat[nch] = r.nsat;
-      charge[nch] = r.charge;
-      if (isPed ? cfg.fit : cfg.normFit) {
-        const DarkFitResult & f = fn;
-        fit_base[nch] = f.ok ? f.b : 0;
-        fit_sigma[nch] = f.ok ? f.sigma : 0;
-        fit_chi2[nch] = f.ok ? f.chi2ndf : -1;
-        npul[nch] = f.ok ? f.pulses.size() : -1;
-        for (const DarkPulse & dp : f.pulses) {
-          if (npulse >= kMaxPul) break;
-          pul_ch[npulse] = nch;
-          pul_t[npulse] = dp.mu;
-          pul_h[npulse] = dp.h;
-          pul_area[npulse] = dp.area;
-          npulse++;
-        }
-      }
-      mods.insert((ch->GetID() - 1) / 4);
-      if (ch->GetBit() != 0) nhit++;
-      nch++;
+      c.lvl = 0;
+      if (ev.isPed ? (cfg.fit || cfg.normFit) : cfg.normFit)
+        c.fn = ev.isPed ? fitter.Fit(y, 0, nd) : fitter.Fit(y, cfg.normLo, cfg.normHi);
+      if (cfg.normFit && c.fn.ok) c.lvl = c.fn.b; // a failed fit falls back to the header pedestal
+      c.r = ev.isPed ? Measure(wv, nd, hped + c.lvl, pedLo, pHi, cfg)
+                     : Measure(wv, nd, hped + c.lvl, cfg.normLo, cfg.normHi, cfg);
     }
-    nmod = mods.size();
-    (isPed ? tped : tnorm)->Fill();
+  };
+  constexpr Long64_t kBatch = 16384; // events read, then worked on together
+  constexpr int kChunk = 64;         // events a thread takes at a time
+  std::vector<Event> batch;
+
+  TStopwatch watch;
+  Long64_t nshort = 0;
+  const Long64_t n = tin->GetEntries();
+  for (Long64_t i0 = 0; i0 < n; i0 += kBatch) {
+    const Long64_t nb = std::min(kBatch, n - i0);
+    batch.resize(nb);
+    for (Long64_t b = 0; b < nb; b++) {
+      tin->GetEntry(i0 + b);
+      Event & ev = batch[b];
+      ev.isPed = info->GetTriggerType() == kPedTrigType;
+      ev.evtNum = info->GetEventNumber();
+      ev.trgNum = info->GetTriggerNumber();
+      ev.trgTime = info->GetTriggerTime();
+      ev.ch.clear();
+      for (int j = 0; j < data->GetN() && (int)ev.ch.size() < kMaxCh; j++) {
+        const FChannel * ch = data->Get(j);
+        const int nd = std::min(ch->GetNdp(), kMaxNdp);
+        const int pHi = pedHi > 0 ? pedHi : nd;
+        if (nd < cfg.intHi || nd < cfg.normHi || nd < pHi) {
+          nshort++;
+          continue;
+        }
+        Chan c{};
+        c.id = ch->GetID();
+        c.bit = ch->GetBit();
+        c.hped = ch->GetPedestal();
+        c.nd = nd;
+        c.w.assign(ch->GetWaveform(), ch->GetWaveform() + nd);
+        ev.ch.push_back(std::move(c));
+      }
+    }
+
+    std::atomic<Long64_t> next{0};
+    auto worker = [&]() {
+      for (Long64_t b0; (b0 = next.fetch_add(kChunk)) < nb;)
+        for (Long64_t b = b0; b < std::min(b0 + kChunk, nb); b++)
+          work(batch[b]);
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nthreads; t++)
+      pool.emplace_back(worker);
+    worker();
+    for (std::thread & t : pool)
+      t.join();
+
+    for (Long64_t b = 0; b < nb; b++) {
+      const Event & ev = batch[b];
+      const bool isPed = ev.isPed;
+      evtNum = ev.evtNum;
+      trgNum = ev.trgNum;
+      trgTime = ev.trgTime;
+      nch = 0;
+      nhit = 0;
+      npulse = 0;
+      std::set<int> mods;
+      for (const Chan & c : ev.ch) {
+        const DarkFitResult & fn = c.fn;
+        const ChanResult & r = c.r;
+        qbase[nch] = c.lvl;
+        pid[nch] = c.id;
+        tbit[nch] = c.bit;
+        ped[nch] = c.hped;
+        base[nch] = r.base;
+        rms[nch] = r.rms;
+        qpre[nch] = r.qpre;
+        hmax[nch] = r.hmax;
+        hmaxx[nch] = r.hmaxx;
+        tlead[nch] = r.tlead;
+        tcf[nch] = r.tcf;
+        nsat[nch] = r.nsat;
+        charge[nch] = r.charge;
+        if (isPed ? cfg.fit : cfg.normFit) {
+          const DarkFitResult & f = fn;
+          fit_base[nch] = f.ok ? f.b : 0;
+          fit_sigma[nch] = f.ok ? f.sigma : 0;
+          fit_chi2[nch] = f.ok ? f.chi2ndf : -1;
+          npul[nch] = f.ok ? f.pulses.size() : -1;
+          for (const DarkPulse & dp : f.pulses) {
+            if (npulse >= kMaxPul) break;
+            pul_ch[npulse] = nch;
+            pul_t[npulse] = dp.mu;
+            pul_h[npulse] = dp.h;
+            pul_area[npulse] = dp.area;
+            npulse++;
+          }
+        }
+        mods.insert((c.id - 1) / 4);
+        if (c.bit != 0) nhit++;
+        nch++;
+      }
+      nmod = mods.size();
+      (isPed ? tped : tnorm)->Fill();
+    }
   }
 
   fout->cd();
@@ -678,23 +747,32 @@ static void Usage(const char * prog)
   printf("usage: %s -o OUTPUT [-c CONFIG] INPUT\n"
          "  INPUT               raw IADC_<run>.root.<subrun> file\n"
          "  -o, --out FILE      output file (required)\n"
-         "  -c, --config FILE   YAML settings (default: built-in)\n",
+         "  -c, --config FILE   YAML settings (default: built-in)\n"
+         "  -j, --threads N     threads for the channel fits (default 1)\n",
          prog);
 }
 
 int main(int argc, char ** argv)
 {
   const char *cfg = "", *out = nullptr;
+  long long nthreads = 1;
 
   const option opts[] = {{"out", required_argument, nullptr, 'o'},
                          {"config", required_argument, nullptr, 'c'},
+                         {"threads", required_argument, nullptr, 'j'},
                          {"help", no_argument, nullptr, 'h'},
                          {nullptr, 0, nullptr, 0}};
   int c;
-  while ((c = getopt_long(argc, argv, "o:c:h", opts, nullptr)) != -1) {
+  while ((c = getopt_long(argc, argv, "o:c:j:h", opts, nullptr)) != -1) {
     switch (c) {
       case 'o': out = optarg; break;
       case 'c': cfg = optarg; break;
+      case 'j':
+        if (!ParseInt(optarg, nthreads) || nthreads < 1 || nthreads > 256) {
+          printf("ERROR: -j wants 1 to 256 threads, not '%s'\n", optarg);
+          return 2;
+        }
+        break;
       case 'h': Usage(argv[0]); return 0;
       default: Usage(argv[0]); return 2;
     }
@@ -703,5 +781,5 @@ int main(int argc, char ** argv)
     Usage(argv[0]);
     return 2;
   }
-  return produce(argv[optind], out, cfg);
+  return produce(argv[optind], out, cfg, (int)nthreads);
 }
